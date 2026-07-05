@@ -1,7 +1,6 @@
 """
 main.py
 Runs the complete Seattle Mariners Midseason Analyzer.
-One command to build all data, analyze, grade, recommend, and report.
 
 Usage:
     python main.py                    # full run with cache
@@ -15,16 +14,12 @@ import time
 import argparse
 from datetime import date
 
+
 def parse_args():
-    p = argparse.ArgumentParser(
-        description="Seattle Mariners Midseason Analyzer"
-    )
-    p.add_argument("--refresh",    action="store_true",
-                   help="Force refresh all cached data")
-    p.add_argument("--no-report",  action="store_true",
-                   help="Skip Excel report generation")
-    p.add_argument("--print-only", action="store_true",
-                   help="Print to console only, no Excel")
+    p = argparse.ArgumentParser(description="Seattle Mariners Midseason Analyzer")
+    p.add_argument("--refresh",    action="store_true", help="Force refresh all data")
+    p.add_argument("--no-report",  action="store_true", help="Skip Excel report")
+    p.add_argument("--print-only", action="store_true", help="Console only, no Excel")
     return p.parse_args()
 
 
@@ -35,29 +30,31 @@ def main():
     print(f"\n{'='*65}")
     print(f"  SEATTLE MARINERS MIDSEASON ANALYZER")
     print(f"  {date.today()}")
+    print(f"  Data source: Baseball Reference (bbref.com)")
+    print(f"  Note: bbref updates 6-24 hours after games")
     print(f"{'='*65}\n")
 
-    # ── step 1: build data ──
+    # step 1
     print("STEP 1/5 — Building data...")
     from data_builder import build_all
     data = build_all(2026, force_refresh=args.refresh)
 
-    # ── step 2: analyze team ──
+    # step 2
     print("\nSTEP 2/5 — Analyzing team...")
     from team_analyzer import analyze_team, print_analysis
     analysis = analyze_team(data)
 
-    # ── step 3: grade players ──
+    # step 3
     print("\nSTEP 3/5 — Grading players...")
     from player_grades import grade_players, print_grades
     grades = grade_players(data)
 
-    # ── step 4: generate recommendations ──
+    # step 4
     print("\nSTEP 4/5 — Generating recommendations...")
     from recommender import generate_recommendations, print_recommendations
     recs = generate_recommendations(data, analysis, grades)
 
-    # ── step 5: generate report ──
+    # step 5
     if not args.no_report and not args.print_only:
         print("\nSTEP 5/5 — Generating Excel report...")
         from output_report import generate_report
@@ -66,12 +63,12 @@ def main():
         print("\nSTEP 5/5 — Skipping Excel report")
         path = None
 
-    # ── print to console ──
+    # print to console
     print_analysis(analysis)
     print_grades(grades)
     print_recommendations(recs)
 
-    # ── summary ──
+    # summary
     elapsed = round(time.time() - start, 1)
     o = analysis.get("overall", {})
     s = analysis.get("standings", {})
@@ -83,6 +80,7 @@ def main():
     print(f"  Grade:          {o.get('grade')} — {o.get('verdict')}")
     print(f"  Projected wins: {o.get('projected_wins')}")
     print(f"  Range:          {o.get('floor')}—{o.get('ceiling')} wins")
+    print(f"  Data as of:     {date.today()} (refresh with --refresh)")
     if path:
         print(f"  Report:         {path}")
     print(f"{'='*65}\n")

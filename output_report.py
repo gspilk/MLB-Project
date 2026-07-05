@@ -560,6 +560,66 @@ def _sheet_schedule(wb: Workbook, data: dict):
             r += 1
 
 
+
+# ── sheet 7: player targets ───────────────────────────────────────────────────
+def _sheet_targets(wb: Workbook, targets: dict):
+    ws = wb.create_sheet("Trade Targets")
+    ws.sheet_view.showGridLines = False
+
+    r = 1
+    _title(ws, r, "MLB TRADE & WAIVER TARGETS", 9)
+    r += 1
+
+    # batter targets
+    _subtitle(ws, r, "1B/DH TARGETS — xwOBA .330+, Barrel% 8%+, non-contender", 9)
+    r += 1
+    bat_h = ["Name","Team","PA","xwOBA","Barrel%","HardHit%","HR","OPS","Fit"]
+    bat_w = [25,7,6,8,9,10,5,7,30]
+    _set_col_widths(ws, bat_w)
+    for i,(h,w) in enumerate(zip(bat_h,bat_w),1):
+        _header(ws, r, i, h, size=10)
+        ws.column_dimensions[get_column_letter(i)].width = w
+    r += 1
+
+    for p in targets.get("batter_targets",[])[:10]:
+        xw = pd.to_numeric(p.get("xwOBA"), errors="coerce")
+        color = GREEN if xw and xw >= 0.360 else                 "E8F5E9" if xw and xw >= 0.340 else LGRAY
+        _cell(ws, r, 1, p.get("name",""), bold=True, color=color)
+        _cell(ws, r, 2, p.get("team",""), color=color, align="center")
+        _cell(ws, r, 3, p.get("PA"), color=color, align="center")
+        _cell(ws, r, 4, p.get("xwOBA"), color=color, align="center", fmt="0.000")
+        _cell(ws, r, 5, p.get("Barrel%"), color=color, align="center", fmt="0.0")
+        _cell(ws, r, 6, p.get("HardHit%"), color=color, align="center", fmt="0.0")
+        _cell(ws, r, 7, p.get("HR"), color=color, align="center")
+        _cell(ws, r, 8, p.get("OPS"), color=color, align="center", fmt="0.000")
+        _cell(ws, r, 9, p.get("fit",""), color=color)
+        r += 1
+
+    r += 1
+    # pitcher targets
+    _subtitle(ws, r, "BULLPEN TARGETS — xwOBA against ≤.310, 20+ IP, non-contender", 9)
+    r += 1
+    pit_h = ["Name","Team","G","IP","ERA","WHIP","K%","xwOBA vs","Fit"]
+    pit_w = [25,7,5,6,7,7,6,9,30]
+    for i,(h,w) in enumerate(zip(pit_h,pit_w),1):
+        _header(ws, r, i, h, size=10)
+        ws.column_dimensions[get_column_letter(i)].width = w
+    r += 1
+
+    for p in targets.get("pitcher_targets",[])[:10]:
+        xw = pd.to_numeric(p.get("xwOBA_against"), errors="coerce")
+        color = GREEN if xw and xw <= 0.270 else                 "E8F5E9" if xw and xw <= 0.290 else LGRAY
+        _cell(ws, r, 1, p.get("name",""), bold=True, color=color)
+        _cell(ws, r, 2, p.get("team",""), color=color, align="center")
+        _cell(ws, r, 3, p.get("G"), color=color, align="center")
+        _cell(ws, r, 4, p.get("IP"), color=color, align="center", fmt="0.0")
+        _cell(ws, r, 5, p.get("ERA"), color=color, align="center", fmt="0.00")
+        _cell(ws, r, 6, p.get("WHIP"), color=color, align="center", fmt="0.000")
+        _cell(ws, r, 7, p.get("K%"), color=color, align="center", fmt="0.0")
+        _cell(ws, r, 8, p.get("xwOBA_against"), color=color, align="center", fmt="0.000")
+        _cell(ws, r, 9, p.get("fit",""), color=color)
+        r += 1
+
 # ── main generate function ────────────────────────────────────────────────────
 def generate_report(data: dict, analysis: dict,
                     grades: dict, recs: dict,
@@ -587,6 +647,7 @@ def generate_report(data: dict, analysis: dict,
     _sheet_statcast(wb, data)
     _sheet_stats(wb, si)
     _sheet_moves(wb, im, dl)
+    _sheet_targets(wb, recs.get("targets", {}))
     _sheet_schedule(wb, data)
 
     wb.save(path)

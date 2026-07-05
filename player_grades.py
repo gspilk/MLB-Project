@@ -1,5 +1,5 @@
 """
-player_grader.py
+player_grades.py
 Grades EVERY Seattle Mariners player using:
   - bbref batting/pitching/fielding as the primary source
   - Statcast xwOBA + Barrel% + HardHit% as supplement where available
@@ -79,17 +79,51 @@ IL_PLAYERS = {
     "Wilson":     "10-day IL — bench depth",
 }
 
-ROSTER_NOTES = {
-    "Kirby":          "K rate declined recently — monitor closely",
-    "Muñoz":          "ERA elevated — curveball command inconsistent",
-    "Brash":          "0.60 ERA — best reliever on staff",
-    "Bryce Miller":   "xwOBA .221 top 3% MLB — needs more starts",
-    "José Ferrer":    "xwOBA .242 — unlucky, better than ERA shows",
-    "Canzone":        "xwOBA .365 — most underrated bat on roster",
-    "Castillo":       "ERA trending down in 6-man role",
-    "Colt Emerson":   "8yr/$95M — franchise investment, age 20",
-    "Wisdom":         ".882 OPS — legitimate power bat off bench",
-}
+# roster notes are generated from data — no hardcoded text
+ROSTER_NOTES = {}
+
+def _generate_batter_note(pa, ops, xwoba, woba, barrel, hardhit, hr, war):
+    """Generate data-driven note for a batter."""
+    notes = []
+    if xwoba and woba:
+        gap = round(woba - xwoba, 3)
+        if gap > 0.030:
+            notes.append(f"LUCKY +{gap:.3f} — regression expected")
+        elif gap < -0.030:
+            notes.append(f"UNLUCKY {gap:.3f} — improvement expected")
+    if barrel and barrel >= 15:
+        notes.append(f"Elite power: {barrel:.1f}% Barrel")
+    if barrel and barrel >= 10:
+        notes.append(f"Above avg power: {barrel:.1f}% Barrel")
+    if hardhit and hardhit >= 50:
+        notes.append(f"Elite contact: {hardhit:.1f}% HardHit")
+    if war and war >= 2.0:
+        notes.append(f"Elite WAR: {war:.1f}")
+    if hr and hr >= 15:
+        notes.append(f"{hr} HR — power producing")
+    return " | ".join(notes)
+
+def _generate_pitcher_note(era, xwoba, k9, bb9, whiff, war, ip):
+    """Generate data-driven note for a pitcher."""
+    notes = []
+    if xwoba and era and ip and ip >= 8:
+        # ERA vs xwOBA gap
+        era_expected = (xwoba - 0.200) * 20  # rough conversion
+        if era - era_expected > 1.0:
+            notes.append(f"ERA {era:.2f} misleading — xwOBA {xwoba:.3f} better")
+        elif era_expected - era > 1.0:
+            notes.append(f"ERA {era:.2f} may rise — xwOBA {xwoba:.3f} concerning")
+    if k9 and k9 >= 10.0 and ip and ip >= 8:
+        notes.append(f"Elite K/9: {k9:.1f}")
+    elif k9 and k9 < 6.0 and ip and ip >= 20:
+        notes.append(f"Low K/9: {k9:.1f} — contact pitcher")
+    if bb9 and bb9 >= 4.5 and ip and ip >= 8:
+        notes.append(f"High BB/9: {bb9:.1f} — command concern")
+    if whiff and whiff >= 35:
+        notes.append(f"Elite Whiff%: {whiff:.1f}%")
+    if war and war >= 1.5:
+        notes.append(f"High WAR: {war:.1f}")
+    return " | ".join(notes)
 
 
 # ── grade helpers ─────────────────────────────────────────────────────────────
@@ -110,11 +144,7 @@ def _is_il(name: str) -> bool:
                                for k in IL_PLAYERS)
 
 def _get_note(name: str) -> str:
-    # try full key match first, then word match
-    name_clean = name.lower().replace(","," ")
-    for k, v in ROSTER_NOTES.items():
-        if k.lower() in name_clean:
-            return v
+    # notes are generated from data now
     return ""
 
 def _get_franchise_note(name: str) -> str:
@@ -166,8 +196,14 @@ def _grade_era(era: float, xwoba: float = None,
     Requires minimum IP to avoid small sample grades.
     """
     # insufficient sample
-    if ip < 8:
+    if ip < 5:
         return "Small sample"
+    # for very small samples weight ERA heavily
+    if ip < 15 and xwoba is None:
+        if era is None: return "Small sample"
+        if era <= 3.00: return "Above Average"
+        if era <= 4.50: return "Average"
+        return "Below Average"
 
     # score each metric 1-5
     scores = []
@@ -295,6 +331,7 @@ def grade_players(data: dict) -> dict:
     sea_sc_pit = data.get("statcast", {}).get("sea_pitchers", pd.DataFrame())
     bat_luck   = data.get("statcast", {}).get("bat_luck", pd.DataFrame())
     pit_luck   = data.get("statcast", {}).get("pit_luck", pd.DataFrame())
+    roster_df  = data.get("seattle", {}).get("roster", pd.DataFrame())
 
     # ── grade every batter from bbref ──
     if not bat_bbref.empty and "Name" in bat_bbref.columns:
@@ -363,7 +400,8 @@ def grade_players(data: dict) -> dict:
                    ("Starter" if pa >= 100 else "Bench")
 
             action = _batter_action(name, grade, luck, pa, war)
-            note   = _get_note(name)
+            note   = _generate_batter_note(pa, ops, xwoba, woba,
+                                           barrel, hardhit, hr, None)
 
             # age adjustment for young players
             if grade in ("Below Average","DFA") and _is_franchise(name):
@@ -461,7 +499,8 @@ def grade_players(data: dict) -> dict:
             grade = _grade_era(era, xwoba_against, war, ip)
 
             action = _pitcher_action(name, grade, luck, era, role)
-            note   = _get_note(name)
+            note   = _generate_pitcher_note(era, xwoba_against, k9,
+                                            bb9, whiff, war, ip)
 
             pitcher_grades.append({
                 "name":           name,

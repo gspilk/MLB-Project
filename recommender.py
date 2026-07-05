@@ -355,6 +355,159 @@ def _rotation_bullpen(grades):
     }
 
 
+
+# ── player targets ────────────────────────────────────────────────────────────
+CONTENDERS = {
+    "NYY","TBR","LAD","MIL","ATL","PHI",
+    "CLE","CHW","SEA","NYM","BOS","PIT"
+}
+
+MARINERS_ROSTER = {
+    "rodriguez","arozarena","raley","young",
+    "crawford","raleigh","naylor","canzone",
+    "donovan","emerson","garver","pereda",
+    "kirby","woo","hancock","gilbert","castillo",
+    "miller","munoz","brash","ferrer","bazardo",
+    "criswell","speier","hoppe","wilcox","legumina",
+    "robles","refsnyder","rivas","wilson","joe",
+}
+
+def _find_targets(data: dict) -> dict:
+    """
+    Finds MLB trade/waiver targets using bbref individual stats (has Tm)
+    joined with Statcast xwOBA.
+    Batters:  xwOBA >= .330, Barrel% >= 8%, PA >= 100, non-contender
+    Pitchers: xwOBA_against <= .310, IP >= 20, GS < 3, non-contender
+    """
+    all_bat = _safe(data, "batting",  "all_players")
+    all_pit = _safe(data, "pitching", "all_players")
+    sc_bat  = _safe(data, "statcast", "batters")
+    sc_pit  = _safe(data, "statcast", "pitchers")
+
+    batter_targets  = []
+    pitcher_targets = []
+
+    # ── batters ──────────────────────────────────────────────────────────────
+    try:
+        if all_bat is not None and not all_bat.empty and            sc_bat  is not None and not sc_bat.empty  and            "Name" in all_bat.columns and "Name" in sc_bat.columns and            "Tm"   in all_bat.columns:
+
+            bat_b = all_bat.copy()
+            bat_s = sc_bat.copy()
+
+            # last name join key
+            bat_b["_last"] = bat_b["Name"].str.split().str[-1].str.lower()
+            bat_s["_last"] = bat_s["Name"].str.split(",").str[0].str.lower()
+
+            # select cols
+            b_cols = ["_last","Name","Tm"] +                      [c for c in ["PA","OPS","HR","BA","OBP","SLG","R","RBI"]
+                      if c in bat_b.columns]
+            s_cols = ["_last"] +                      [c for c in ["xwOBA","wOBA","Barrel%","HardHit%","EV50","K%","BB%"]
+                      if c in bat_s.columns]
+
+            merged = pd.merge(bat_b[b_cols], bat_s[s_cols],
+                              on="_last", how="inner")
+
+            # numeric
+            for c in ["xwOBA","Barrel%","PA"]:
+                if c in merged.columns:
+                    merged[c] = pd.to_numeric(merged[c], errors="coerce")
+
+            # filter
+            mask = (
+                (merged["xwOBA"]   >= 0.330) &
+                (merged["Barrel%"] >= 8.0)   &
+                (merged["PA"]      >= 100)    &
+                (~merged["Tm"].isin(CONTENDERS)) &
+                (~merged["_last"].isin(MARINERS_ROSTER))
+            )
+            tgt = merged[mask].sort_values("xwOBA", ascending=False).head(10)
+
+            for _, row in tgt.iterrows():
+                batter_targets.append({
+                    "name":     str(row.get("Name_x", row.get("Name",""))),
+                    "team":     str(row.get("Tm","")),
+                    "PA":       row.get("PA"),
+                    "OPS":      row.get("OPS"),
+                    "HR":       row.get("HR"),
+                    "BA":       row.get("BA"),
+                    "xwOBA":    round(float(row["xwOBA"]),3),
+                    "Barrel%":  row.get("Barrel%"),
+                    "HardHit%": row.get("HardHit%"),
+                    "fit":      "1B/DH trade or waiver target",
+                })
+    except Exception as e:
+        print(f"  [warn] batter target search failed: {e}")
+
+    # ── pitchers ─────────────────────────────────────────────────────────────
+    try:
+        if all_pit is not None and not all_pit.empty and            sc_pit  is not None and not sc_pit.empty  and            "Name" in all_pit.columns and "Name" in sc_pit.columns:
+
+            pit_b = all_pit.copy()
+            pit_s = sc_pit.copy()
+
+            # team col
+            if "Tm" not in pit_b.columns:
+                tm_col = next((c for c in ["Team","team"] if c in pit_b.columns), None)
+                if tm_col:
+                    pit_b = pit_b.rename(columns={tm_col: "Tm"})
+                else:
+                    pit_b["Tm"] = "UNK"
+
+            # relievers only
+            if "GS" in pit_b.columns:
+                pit_b = pit_b[
+                    pd.to_numeric(pit_b["GS"], errors="coerce").fillna(0) < 3
+                ].copy()
+
+            # last name join key
+            pit_b["_last"] = pit_b["Name"].str.split().str[-1].str.lower()
+            pit_s["_last"] = pit_s["Name"].str.split(",").str[0].str.lower()
+
+            p_cols = ["_last","Name","Tm"] +                      [c for c in ["G","IP","ERA","WHIP","SO","BB","SV","HLD"]
+                      if c in pit_b.columns]
+            ps_cols = ["_last"] +                       [c for c in ["xwOBA_against","K%","Whiff%","BB%",
+                                   "HardHit%_against","Barrel%_against"]
+                       if c in pit_s.columns]
+
+            merged_p = pd.merge(pit_b[p_cols], pit_s[ps_cols],
+                                on="_last", how="inner")
+
+            # numeric
+            for c in ["xwOBA_against","IP"]:
+                if c in merged_p.columns:
+                    merged_p[c] = pd.to_numeric(merged_p[c], errors="coerce")
+
+            # filter
+            mask_p = (
+                (merged_p["xwOBA_against"] <= 0.310) &
+                (merged_p["IP"]            >= 20)    &
+                (~merged_p["Tm"].isin(CONTENDERS))   &
+                (~merged_p["_last"].isin(MARINERS_ROSTER))
+            )
+            ptgt = merged_p[mask_p].sort_values(
+                "xwOBA_against", ascending=True
+            ).head(10)
+
+            for _, row in ptgt.iterrows():
+                pitcher_targets.append({
+                    "name":         str(row.get("Name_x", row.get("Name",""))),
+                    "team":         str(row.get("Tm","")),
+                    "G":            row.get("G"),
+                    "IP":           row.get("IP"),
+                    "ERA":          row.get("ERA"),
+                    "WHIP":         row.get("WHIP"),
+                    "K%":           row.get("K%"),
+                    "xwOBA_against":round(float(row["xwOBA_against"]),3),
+                    "fit":          "Bullpen depth — waiver or trade target",
+                })
+    except Exception as e:
+        print(f"  [warn] pitcher target search failed: {e}")
+
+    return {
+        "batter_targets":  batter_targets,
+        "pitcher_targets": pitcher_targets,
+    }
+
 # ── section 6 ────────────────────────────────────────────────────────────────
 def _deadline_moves(data, analysis, stats):
     needs   = []
@@ -440,7 +593,8 @@ def _season_outlook(analysis, data):
 # ── main ──────────────────────────────────────────────────────────────────────
 def generate_recommendations(data, analysis, grades):
     print("\n[recommend] Generating recommendations...")
-    stats = _stats_to_improve(data)
+    stats   = _stats_to_improve(data)
+    targets = _find_targets(data)
     recs  = {
         "generated":        str(date.today()),
         "diagnosis":        _team_diagnosis(analysis),
@@ -449,6 +603,7 @@ def generate_recommendations(data, analysis, grades):
         "lineup":           _lineup_optimization(data, grades),
         "rotation_bullpen": _rotation_bullpen(grades),
         "deadline":         _deadline_moves(data, analysis, stats),
+        "targets":          targets,
         "outlook":          _season_outlook(analysis, data),
     }
     print("[recommend] Done.")
