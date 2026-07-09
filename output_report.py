@@ -647,7 +647,7 @@ def generate_report(data: dict, analysis: dict,
     _sheet_statcast(wb, data)
     _sheet_stats(wb, si)
     _sheet_moves(wb, im, dl)
-    _sheet_targets(wb, recs.get("targets", {}))
+    _sheet_targets(wb, recs.get("player_targets", {}))
     _sheet_schedule(wb, data)
 
     wb.save(path)

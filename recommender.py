@@ -38,6 +38,23 @@ DO_NOT_TRADE = [
 FRANCHISE_KEYS = ["Emerson, Colt", "Colt", "Rodríguez", "Julio",
                   "Raleigh", "Young, Cole", "Cole Young"]
 
+# seller teams = more likely available at deadline
+SELLER_TEAMS = {
+    "angels","athletics","rockies","white sox","nationals",
+    "marlins","tigers","royals","pirates","reds","orioles",
+    "blue jays","twins"
+}
+
+def _availability(team_name):
+    tn = str(team_name).lower()
+    if "mariners" in tn or "seattle" in tn:
+        return "ON ROSTER"
+    if any(s in tn for s in SELLER_TEAMS):
+        return "LIKELY AVAILABLE"
+    return "CHECK AVAILABILITY"
+
+_avail_p = _availability  # same function for pitchers
+
 
 def _safe(d, *keys, default=None):
     for k in keys:
@@ -359,7 +376,8 @@ def _rotation_bullpen(grades):
 # ── player targets ────────────────────────────────────────────────────────────
 CONTENDERS = {
     "NYY","TBR","LAD","MIL","ATL","PHI",
-    "CLE","CHW","SEA","NYM","BOS","PIT"
+    "CLE","CHW","SEA","NYM","BOS","PIT",
+    "MIN","SDP","SFG","HOU","CHC","STL"
 }
 
 MARINERS_ROSTER = {
@@ -370,6 +388,7 @@ MARINERS_ROSTER = {
     "miller","munoz","brash","ferrer","bazardo",
     "criswell","speier","hoppe","wilcox","legumina",
     "robles","refsnyder","rivas","wilson","joe",
+    "mastrobuoni","bliss","pereda","wisdom",
 }
 
 def _find_targets(data: dict) -> dict:
@@ -384,59 +403,140 @@ def _find_targets(data: dict) -> dict:
     sc_bat  = _safe(data, "statcast", "batters")
     sc_pit  = _safe(data, "statcast", "pitchers")
 
+    import unicodedata
+    def _norm(s):
+        """Normalize accents for last name matching."""
+        s = str(s).lower().strip()
+        return "".join(
+            c for c in unicodedata.normalize("NFD", s)
+            if unicodedata.category(c) != "Mn"
+        )
+
     batter_targets  = []
     pitcher_targets = []
 
     # ── batters ──────────────────────────────────────────────────────────────
+    # debug
+    if all_bat is not None and not all_bat.empty:
+        tm_check = [c for c in all_bat.columns if c.lower() in ("tm","team","franchise")]
+        print(f"  [targets] bat cols: {list(all_bat.columns[:8])}")
+        print(f"  [targets] bat tm cols: {tm_check}  rows: {len(all_bat)}")
+    if sc_bat is not None and not sc_bat.empty:
+        print(f"  [targets] sc_bat cols: {list(sc_bat.columns[:6])}")
     try:
-        if all_bat is not None and not all_bat.empty and            sc_bat  is not None and not sc_bat.empty  and            "Name" in all_bat.columns and "Name" in sc_bat.columns and            "Tm"   in all_bat.columns:
+        if all_bat is not None and not all_bat.empty and \
+           sc_bat  is not None and not sc_bat.empty  and \
+           "Name" in all_bat.columns and "Name" in sc_bat.columns:
 
             bat_b = all_bat.copy()
             bat_s = sc_bat.copy()
 
             # last name join key
-            bat_b["_last"] = bat_b["Name"].str.split().str[-1].str.lower()
-            bat_s["_last"] = bat_s["Name"].str.split(",").str[0].str.lower()
+            # use last + first initial for more precise matching
+            # bbref: "Yordan Alvarez" -> "alvarez_y"
+            # savant: "Alvarez, Yordan" -> "alvarez_y"
+            def _name_key(name, fmt="first_last"):
+                name = str(name).strip()
+                if fmt == "first_last":
+                    parts = name.split()
+                    if len(parts) >= 2:
+                        return _norm(parts[-1]) + "_" + _norm(parts[0])[0]
+                    return _norm(name)
+                else:  # last_first (savant format)
+                    parts = name.split(",")
+                    if len(parts) >= 2:
+                        last  = _norm(parts[0].strip())
+                        first = _norm(parts[1].strip())
+                        return last + "_" + first[0]
+                    return _norm(name)
+
+            bat_b["_key"] = bat_b["Name"].apply(lambda n: _name_key(n, "first_last"))
+            bat_s["_key"] = bat_s["Name"].apply(lambda n: _name_key(n, "last_first"))
 
             # select cols
-            b_cols = ["_last","Name","Tm"] +                      [c for c in ["PA","OPS","HR","BA","OBP","SLG","R","RBI"]
+            # detect team column name
+            tm_col_b = next((c for c in ["Tm","Team","team"]
+                            if c in bat_b.columns), None)
+            if tm_col_b is None:
+                raise ValueError("No team column in batting data")
+
+            b_cols = ["_key","Name",tm_col_b] +                      [c for c in ["PA","OPS","HR","BA","OBP","SLG","R","RBI"]
                       if c in bat_b.columns]
-            s_cols = ["_last"] +                      [c for c in ["xwOBA","wOBA","Barrel%","HardHit%","EV50","K%","BB%"]
+            s_cols = ["_key"] +                      [c for c in ["xwOBA","wOBA","Barrel%","HardHit%","EV50","K%","BB%"]
                       if c in bat_s.columns]
 
             merged = pd.merge(bat_b[b_cols], bat_s[s_cols],
-                              on="_last", how="inner")
+                              on="_key", how="inner")
 
             # numeric
             for c in ["xwOBA","Barrel%","PA"]:
                 if c in merged.columns:
                     merged[c] = pd.to_numeric(merged[c], errors="coerce")
 
-            # filter
+            # debug: show merge size and sample
+            print(f"  [targets] merged {len(merged)} batter rows")
+            if not merged.empty:
+                xw = merged["xwOBA"].dropna()
+                print(f"  [targets] xwOBA range: {xw.min():.3f}-{xw.max():.3f}  non-null: {len(xw)}")
+                # check what happened to team column after merge
+                team_cols_after = [c for c in merged.columns if "team" in c.lower() or "tm" in c.lower()]
+                print(f"  [targets] team cols after merge: {team_cols_after}")
+                for tc in team_cols_after:
+                    print(f"  [targets] {tc} sample: {merged[tc].dropna().head(3).tolist()}")
+
+            # full team name to abbrev mapping for contenders filter
+            def _is_mariner_key(key):
+                last = key.split("_")[0] if "_" in key else key
+                return last in MARINERS_ROSTER
+
+            # filter -- all teams, just exclude current Mariners
             mask = (
-                (merged["xwOBA"]   >= 0.330) &
-                (merged["Barrel%"] >= 8.0)   &
-                (merged["PA"]      >= 100)    &
-                (~merged["Tm"].isin(CONTENDERS)) &
-                (~merged["_last"].isin(MARINERS_ROSTER))
+                (merged["xwOBA"]   >= 0.320) &
+                (merged["Barrel%"] >= 7.0)   &
+                (merged["PA"]      >= 80)     &
+                (~merged["_key"].apply(_is_mariner_key))
             )
             tgt = merged[mask].sort_values("xwOBA", ascending=False).head(10)
+            print(f"  [targets] {len(tgt)} batter targets found")
+
 
             for _, row in tgt.iterrows():
+                # Name_y is statcast format: "Rodriguez, Julio"
+                # reformat to: "Julio Rodriguez"
+                name_y = str(row.get("Name_y",""))
+                if "," in name_y:
+                    parts = name_y.split(",", 1)
+                    player_name = f"{parts[1].strip()} {parts[0].strip()}"
+                else:
+                    player_name = name_y
+                if not player_name or player_name == "nan":
+                    player_name = str(row.get("Name_x", row.get("Name","")))
+
+                # team column after merge might be renamed
+                team_val = None
+                for _tc in [tm_col_b, tm_col_b+"_x", "Team", "Tm", "Team_x", "Tm_x"]:
+                    _v = row.get(_tc)
+                    if _v and str(_v) not in ("nan","","None"):
+                        team_val = str(_v)
+                        break
+                avail = _availability(team_val or "")
                 batter_targets.append({
-                    "name":     str(row.get("Name_x", row.get("Name",""))),
-                    "team":     str(row.get("Tm","")),
-                    "PA":       row.get("PA"),
-                    "OPS":      row.get("OPS"),
-                    "HR":       row.get("HR"),
-                    "BA":       row.get("BA"),
-                    "xwOBA":    round(float(row["xwOBA"]),3),
-                    "Barrel%":  row.get("Barrel%"),
-                    "HardHit%": row.get("HardHit%"),
-                    "fit":      "1B/DH trade or waiver target",
+                    "name":         player_name,
+                    "team":         team_val or "N/A",
+                    "PA":           row.get("PA"),
+                    "OPS":          row.get("OPS"),
+                    "HR":           row.get("HR"),
+                    "BA":           row.get("BA"),
+                    "xwOBA":        round(float(row["xwOBA"]),3),
+                    "Barrel%":      row.get("Barrel%"),
+                    "HardHit%":     row.get("HardHit%"),
+                    "availability": avail,
+                    "fit":          "1B/DH trade or waiver target",
                 })
     except Exception as e:
+        import traceback
         print(f"  [warn] batter target search failed: {e}")
+        traceback.print_exc()
 
     # ── pitchers ─────────────────────────────────────────────────────────────
     try:
@@ -460,38 +560,62 @@ def _find_targets(data: dict) -> dict:
                 ].copy()
 
             # last name join key
-            pit_b["_last"] = pit_b["Name"].str.split().str[-1].str.lower()
-            pit_s["_last"] = pit_s["Name"].str.split(",").str[0].str.lower()
+            pit_b["_key"] = pit_b["Name"].apply(lambda n: _name_key(n, "first_last"))
+            pit_s["_key"] = pit_s["Name"].apply(lambda n: _name_key(n, "last_first"))
 
-            p_cols = ["_last","Name","Tm"] +                      [c for c in ["G","IP","ERA","WHIP","SO","BB","SV","HLD"]
+            tm_col_p = next((c for c in ["Tm","Team","team"]
+                            if c in pit_b.columns), None)
+            if tm_col_p is None:
+                raise ValueError("No team column in pitching data")
+
+            p_cols = ["_key","Name",tm_col_p] +                      [c for c in ["G","IP","ERA","WHIP","SO","BB","SV","HLD"]
                       if c in pit_b.columns]
-            ps_cols = ["_last"] +                       [c for c in ["xwOBA_against","K%","Whiff%","BB%",
+            ps_cols = ["_key"] +                       [c for c in ["xwOBA_against","K%","Whiff%","BB%",
                                    "HardHit%_against","Barrel%_against"]
                        if c in pit_s.columns]
 
             merged_p = pd.merge(pit_b[p_cols], pit_s[ps_cols],
-                                on="_last", how="inner")
+                                on="_key", how="inner")
 
             # numeric
             for c in ["xwOBA_against","IP"]:
                 if c in merged_p.columns:
                     merged_p[c] = pd.to_numeric(merged_p[c], errors="coerce")
 
-            # filter
+            # filter -- all teams, just exclude current Mariners
             mask_p = (
                 (merged_p["xwOBA_against"] <= 0.310) &
                 (merged_p["IP"]            >= 20)    &
-                (~merged_p["Tm"].isin(CONTENDERS))   &
-                (~merged_p["_last"].isin(MARINERS_ROSTER))
+                (~merged_p["_key"].apply(lambda k: k.split("_")[0] in MARINERS_ROSTER))
             )
+            print(f"  [debug] pitcher merge cols with team: {[c for c in merged_p.columns if any(t in c.lower() for t in ['team','tm','name'])]}")
             ptgt = merged_p[mask_p].sort_values(
                 "xwOBA_against", ascending=True
-            ).head(10)
+            )
+            ptgt = ptgt.drop_duplicates(subset=["_key"]).head(10)
+            print(f"  [targets] {len(ptgt)} pitcher targets found")
 
             for _, row in ptgt.iterrows():
+                name_y = str(row.get("Name_y",""))
+                if "," in name_y:
+                    parts = name_y.split(",", 1)
+                    player_name = f"{parts[1].strip()} {parts[0].strip()}"
+                else:
+                    player_name = name_y
+                if not player_name or player_name == "nan":
+                    player_name = str(row.get("Name_x", row.get("Name","")))
+
+                team_val_p = None
+                for _tc in ["Tm", "Tm_x", tm_col_p, tm_col_p+"_x", "Team", "Team_x"]:
+                    _v = row.get(_tc)
+                    if _v and str(_v) not in ("nan","","None","nan"):
+                        team_val_p = str(_v)
+                        break
+                avail_p = _avail_p(team_val_p or "")
                 pitcher_targets.append({
-                    "name":         str(row.get("Name_x", row.get("Name",""))),
-                    "team":         str(row.get("Tm","")),
+                    "name":         player_name,
+                    "team":         team_val_p or "N/A",
+                    "availability": avail_p,
                     "G":            row.get("G"),
                     "IP":           row.get("IP"),
                     "ERA":          row.get("ERA"),
@@ -593,8 +717,8 @@ def _season_outlook(analysis, data):
 # ── main ──────────────────────────────────────────────────────────────────────
 def generate_recommendations(data, analysis, grades):
     print("\n[recommend] Generating recommendations...")
-    stats   = _stats_to_improve(data)
-    targets = _find_targets(data)
+    stats          = _stats_to_improve(data)
+    player_targets = _find_targets(data)
     recs  = {
         "generated":        str(date.today()),
         "diagnosis":        _team_diagnosis(analysis),
@@ -603,7 +727,7 @@ def generate_recommendations(data, analysis, grades):
         "lineup":           _lineup_optimization(data, grades),
         "rotation_bullpen": _rotation_bullpen(grades),
         "deadline":         _deadline_moves(data, analysis, stats),
-        "targets":          targets,
+        "player_targets":   player_targets,
         "outlook":          _season_outlook(analysis, data),
     }
     print("[recommend] Done.")

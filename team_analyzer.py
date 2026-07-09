@@ -360,8 +360,34 @@ def analyze_standings(data: dict) -> dict:
             w = row.get("W")
             l = row.get("L")
             if w and l:
-                result["record"]   = f"{int(w)}-{int(l)}"
-                result["win_pct"]  = round(int(w)/(int(w)+int(l)), 3)
+                try:
+                    result["record"]  = f"{int(float(w))}-{int(float(l))}"
+                    result["win_pct"] = round(int(float(w))/(int(float(w))+int(float(l))), 3)
+                except Exception:
+                    pass
+
+    # fallback: get record from division standings
+    if not result["record"]:
+        div = _safe_get(data, "standings", "division")
+        if div:
+            for div_name, div_df in div.items():
+                if div_df is None or div_df.empty:
+                    continue
+                tm_col = next((c for c in ["Tm","Team","Name"]
+                               if c in div_df.columns), None)
+                if not tm_col:
+                    continue
+                sea = div_df[div_df[tm_col].str.contains("Seattle", na=False)]
+                if not sea.empty:
+                    w = sea["W"].values[0] if "W" in sea.columns else None
+                    l = sea["L"].values[0] if "L" in sea.columns else None
+                    if w and l:
+                        try:
+                            result["record"]  = f"{int(float(w))}-{int(float(l))}"
+                            result["win_pct"] = round(int(float(w))/(int(float(w))+int(float(l))), 3)
+                        except Exception:
+                            pass
+                    break
 
     # flags
     luck = result["luck"]

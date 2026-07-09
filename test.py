@@ -1,36 +1,29 @@
-# Standard libraries
-import requests
-from bs4 import BeautifulSoup
+from data_builder import build_all
+from team_analyzer import analyze_team
+from player_grades import grade_players
+from recommender import generate_recommendations
 
-def decode_secret_message(url):
-    # Fetch and parse the published Google Doc
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, "html.parser")
+data     = build_all(2026)
+analysis = analyze_team(data)
+grades   = grade_players(data)
+recs     = generate_recommendations(data, analysis, grades)
 
-    # Extract (x, y, character) rows from the table
-    table = soup.find("table")
-    rows = table.find_all("tr")
+tg = recs.get("player_targets", {})
+bt = tg.get("batter_targets", [])
+pt = tg.get("pitcher_targets", [])
 
-    datapoints = []
-    for row in rows[1:]:  # skip header row
-        cells = row.find_all("td")
-        x = int(cells[0].text)
-        char = cells[1].text
-        y = int(cells[2].text)
-        datapoints.append((x, y, char))
+print("\nBATTER TARGETS (sorted by xwOBA):")
+print(f"  {'Name':<25} {'Team':<22} {'Avail':<20} {'xwOBA':>6} {'Barrel%':>8} {'HR':>4} {'OPS':>6}")
+print("  " + "-"*95)
+for p in bt:
+    print(f"  {str(p['name']):<25} {str(p['team']):<22} {str(p.get('availability','?')):<20} "
+          f"{str(p['xwOBA']):>6} {str(p.get('Barrel%','N/A')):>8} "
+          f"{str(p.get('HR','N/A')):>4} {str(p.get('OPS','N/A')):>6}")
 
-    # Determine grid size
-    max_x = max(item[0] for item in datapoints)
-    max_y = max(item[1] for item in datapoints)
-
-    # Build grid filled with spaces, then place characters
-    grid = [[' ' for _ in range(max_x + 1)] for _ in range(max_y + 1)]
-    for x, y, char in datapoints:
-        grid[y][x] = char
-
-    # Print grid (reversed so y=0 is at the top)
-    for row in grid[::-1]:
-        print(''.join(row))
-
-# calling decode_secret_message to decode and build the message in the url
-decode_secret_message("https://docs.google.com/document/d/e/2PACX-1vSvM5gDlNvt7npYHhp_XfsJvuntUhq184By5xO_pA4b_gCWeXb6dM6ZxwN8rE6S4ghUsCj2VKR21oEP/pub")
+print("\nPITCHER TARGETS (sorted by xwOBA against):")
+print(f"  {'Name':<25} {'Team':<22} {'Avail':<20} {'G':>3} {'IP':>5} {'ERA':>5} {'xwOBA vs':>9}")
+print("  " + "-"*95)
+for p in pt:
+    print(f"  {str(p['name']):<25} {str(p['team']):<22} {str(p.get('availability','?')):<20} "
+          f"{str(p.get('G','N/A')):>3} {str(p.get('IP','N/A')):>5} "
+          f"{str(p.get('ERA','N/A')):>5} {str(p['xwOBA_against']):>9}")
