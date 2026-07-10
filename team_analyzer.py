@@ -576,6 +576,9 @@ def overall_grade(offense: dict, pitching: dict,
         grade   = "C"
         verdict = "Bubble team"
 
+    # override deadline if pitching is elite regardless of record
+    # elite pitching + injuries = buy not sell
+
     # win projection -- blend current pace with last30 pace
     record   = standings.get("record","0-0")
     last30   = standings.get("last30","")
@@ -605,6 +608,23 @@ def overall_grade(offense: dict, pitching: dict,
     except Exception:
         projected_wins = 88
 
+    # deadline logic:
+    # elite rotation (rank <=6) = never sell, always at least minor buyer
+    # injuries driving bad record = buy not sell
+    era_rank = pitching.get("team_era_rank", 15)
+    luck     = float(standings.get("luck", 0) or 0)
+
+    if era_rank and era_rank <= 6:
+        deadline = "Minor buyer — elite pitching, add depth"
+    elif era_rank and era_rank <= 10 and luck < -1.0:
+        deadline = "Minor buyer — unlucky, improvement coming"
+    elif total >= 2.5:
+        deadline = "Minor buyer"
+    elif total >= 2.0 and luck < -1.5:
+        deadline = "Stand pat — injuries + bad luck, not a seller"
+    else:
+        deadline = "Seller"
+
     return {
         "grade":          grade,
         "verdict":        verdict,
@@ -614,7 +634,7 @@ def overall_grade(offense: dict, pitching: dict,
         "projected_wins": projected_wins,
         "floor":          projected_wins - 3,
         "ceiling":        projected_wins + 4,
-        "buyer_seller":   "Minor buyer" if total >= 2.5 else "Seller",
+        "buyer_seller":   deadline,
     }
 
 

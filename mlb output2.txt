@@ -1,0 +1,218 @@
+PS C:\Users\geoff\OneDrive\Desktop\MLB PROJECT> python simulator.py            
+
+[simulate] Running deadline scenarios...
+[simulate] 9 scenarios complete.
+
+======================================================================
+SEATTLE MARINERS — DEADLINE ACQUISITION SIMULATOR
+As of: 2026-07-10  |  Record: 47-47
+Games remaining: 68  |  Luck: -2.0
+======================================================================
+
+-- SCENARIO SUMMARY --
+  Scenario                                       RS/G  RA/G  Win% Proj W    Final Playoff
+  ───────────────────────────────────────────────────────────────────────────────────────────────
+  Baseline — no moves, no IL returns             3.82  3.57 0.531     36 83-79  Wild Card 3 (bubble)
+  IL Returns Only — no deadline moves            4.16  3.43 0.588     39 86-76  Division winner
+  IL Returns + YES Targets (Eldridge + Bleday    4.38  3.43 0.611     40 87-75  Division winner
+  IL Returns + YES + Pitching (+ Lee + Varland   4.38  3.30 0.627     41 88-74  Division winner
+  IL Returns + MAYBE (Dingler + Vargas + Contr   4.36  3.43 0.609     40 87-75  Division winner
+  Best Case — All IL + YES + Pitching            4.38  3.25 0.634     41 88-74  Division winner
+  Worst Case — No moves, Julio slow return       3.82  3.43 0.550     37 84-78  Division winner
+  Optimistic IL — Everyone Returns Early         4.17  3.41 0.591     39 86-76  Division winner
+  Pessimistic IL — Setbacks, Late Returns        4.22  3.39 0.599     39 86-76  Division winner
+
+-- BASELINE — NO MOVES, NO IL RETURNS --
+  RS/G: 3.82  RA/G: 3.57  Win%: 0.531  Luck wins: 0
+  Projected: 83-79  (0.512 win%)
+  Playoff: Wild Card 3 (bubble)
+  vs TEX:  +0 games
+  vs HOU:  +4 games
+
+-- IL RETURNS ONLY — NO DEADLINE MOVES --
+  RS/G: 4.16  RA/G: 3.43  Win%: 0.588  Luck wins: 1
+  Projected: 86-76  (0.531 win%)
+  Playoff: Division winner
+  vs TEX:  +3 games
+  vs HOU:  +7 games
+  Factors:
+    * IL return: Julio Rodriguez          +0.180 RS/G         Franchise CF, .337 xwOBA, 14 HR — est Jul 10
+    * IL return: Brendan Donovan          +0.128 RS/G         .839 OPS when healthy — est Jul 17
+    * IL return: Will Wilson              +0.035 RS/G         Bench depth — est Jul 20
+    * IL return: Matt Brash               -0.088 RA/G         0.54 ERA closer — est Jul 20 from 15-day IL
+    * IL return: Carlos Vargas            -0.035 RA/G         Bullpen depth — est Aug 3 from 60-day IL
+    * IL return: Cooper Criswell          -0.022 RA/G         60-day IL — return date uncertain
+    * Luck correction                                         Luck -2.0 → ~1 free wins
+
+-- IL RETURNS + YES TARGETS (ELDRIDGE + BLEDAY + JEFFERS) --
+  RS/G: 4.38  RA/G: 3.43  Win%: 0.611  Luck wins: 1
+  Projected: 87-75  (0.537 win%)
+  Playoff: Division winner
+  vs TEX:  +4 games
+  vs HOU:  +8 games
+  Factors:
+    * IL return: Julio Rodriguez          +0.180 RS/G         Franchise CF, .337 xwOBA, 14 HR — est Jul 10
+    * IL return: Brendan Donovan          +0.128 RS/G         .839 OPS when healthy — est Jul 17
+    * IL return: Will Wilson              +0.035 RS/G         Bench depth — est Jul 20
+    * IL return: Matt Brash               -0.088 RA/G         0.54 ERA closer — est Jul 20 from 15-day IL
+    * IL return: Carlos Vargas            -0.035 RA/G         Bullpen depth — est Aug 3 from 60-day IL
+    * IL return: Cooper Criswell          -0.022 RA/G         60-day IL — return date uncertain
+    * Acquired: Bryce Eldridge            +0.088 RS/G         NL power bat, .405 xwOBA, upside
+    * Acquired: JJ Bleday                 +0.074 RS/G         OF depth, .399 xwOBA, 14 HR
+    * Acquired: Ryan Jeffers              +0.059 RS/G         .949 OPS, insurance/DH flexibility
+    * Luck correction                                         Luck -2.0 → ~1 free wins
+
+-- IL RETURNS + YES + PITCHING (+ LEE + VARLAND) --
+  RS/G: 4.38  RA/G: 3.3  Win%: 0.627  Luck wins: 1
+  Projected: 88-74  (0.543 win%)
+  Playoff: Division winner
+  vs TEX:  +5 games
+  vs HOU:  +9 games
+  Factors:
+    * IL return: Julio Rodriguez          +0.180 RS/G         Franchise CF, .337 xwOBA, 14 HR — est Jul 10
+    * IL return: Brendan Donovan          +0.128 RS/G         .839 OPS when healthy — est Jul 17
+    * IL return: Will Wilson              +0.035 RS/G         Bench depth — est Jul 20
+    * IL return: Matt Brash               -0.088 RA/G         0.54 ERA closer — est Jul 20 from 15-day IL
+    * IL return: Carlos Vargas            -0.035 RA/G         Bullpen depth — est Aug 3 from 60-day IL
+    * IL return: Cooper Criswell          -0.022 RA/G         60-day IL — return date uncertain
+    * Acquired: Bryce Eldridge            +0.088 RS/G         NL power bat, .405 xwOBA, upside
+    * Acquired: JJ Bleday                 +0.074 RS/G         OF depth, .399 xwOBA, 14 HR
+    * Acquired: Ryan Jeffers              +0.059 RS/G         .949 OPS, insurance/DH flexibility
+    * Acquired: Dylan Lee                 -0.066 RA/G         Elite .209 xwOBA, 1.52 ERA
+    * Acquired: Louis Varland             -0.059 RA/G         Elite .216 xwOBA, 0.94 ERA
+    * Luck correction                                         Luck -2.0 → ~1 free wins
+
+-- IL RETURNS + MAYBE (DINGLER + VARGAS + CONTRERAS) --
+  RS/G: 4.36  RA/G: 3.43  Win%: 0.609  Luck wins: 1
+  Projected: 87-75  (0.537 win%)
+  Playoff: Division winner
+  vs TEX:  +4 games
+  vs HOU:  +8 games
+  Factors:
+    * IL return: Julio Rodriguez          +0.180 RS/G         Franchise CF, .337 xwOBA, 14 HR — est Jul 10
+    * IL return: Brendan Donovan          +0.128 RS/G         .839 OPS when healthy — est Jul 17
+    * IL return: Will Wilson              +0.035 RS/G         Bench depth — est Jul 20
+    * IL return: Matt Brash               -0.088 RA/G         0.54 ERA closer — est Jul 20 from 15-day IL
+    * IL return: Carlos Vargas            -0.035 RA/G         Bullpen depth — est Aug 3 from 60-day IL
+    * IL return: Cooper Criswell          -0.022 RA/G         60-day IL — return date uncertain
+    * Acquired: Dillon Dingler            +0.081 RS/G         Tigers seller, .409 xwOBA, 19 HR
+    * Acquired: Miguel Vargas             +0.066 RS/G         Versatile, .397 xwOBA, 20 HR
+    * Acquired: Willson Contreras         +0.052 RS/G         Veteran, playoff experience
+    * Luck correction                                         Luck -2.0 → ~1 free wins
+
+-- BEST CASE — ALL IL + YES + PITCHING --
+  RS/G: 4.38  RA/G: 3.25  Win%: 0.634  Luck wins: 1
+  Projected: 88-74  (0.543 win%)
+  Playoff: Division winner
+  vs TEX:  +5 games
+  vs HOU:  +9 games
+  Factors:
+    * IL return: Julio Rodriguez          +0.180 RS/G         Franchise CF, .337 xwOBA, 14 HR — est Jul 10
+    * IL return: Brendan Donovan          +0.128 RS/G         .839 OPS when healthy — est Jul 17
+    * IL return: Will Wilson              +0.035 RS/G         Bench depth — est Jul 20
+    * IL return: Matt Brash               -0.088 RA/G         0.54 ERA closer — est Jul 20 from 15-day IL
+    * IL return: Carlos Vargas            -0.035 RA/G         Bullpen depth — est Aug 3 from 60-day IL
+    * IL return: Cooper Criswell          -0.022 RA/G         60-day IL — return date uncertain
+    * Acquired: Bryce Eldridge            +0.088 RS/G         NL power bat, .405 xwOBA, upside
+    * Acquired: JJ Bleday                 +0.074 RS/G         OF depth, .399 xwOBA, 14 HR
+    * Acquired: Ryan Jeffers              +0.059 RS/G         .949 OPS, insurance/DH flexibility
+    * Acquired: Dylan Lee                 -0.066 RA/G         Elite .209 xwOBA, 1.52 ERA
+    * Acquired: Louis Varland             -0.059 RA/G         Elite .216 xwOBA, 0.94 ERA
+    * Acquired: Raisel Iglesias           -0.052 RA/G         Veteran closer/setup, 2.30 ERA
+    * Luck correction                                         Luck -2.0 → ~1 free wins
+
+-- WORST CASE — NO MOVES, JULIO SLOW RETURN --
+  RS/G: 3.82  RA/G: 3.43  Win%: 0.55  Luck wins: 0
+  Projected: 84-78  (0.519 win%)
+  Playoff: Division winner
+  vs TEX:  +1 games
+  vs HOU:  +5 games
+  Factors:
+    * IL return: Matt Brash               -0.088 RA/G         0.54 ERA closer — est Jul 20 from 15-day IL
+    * IL return: Carlos Vargas            -0.035 RA/G         Bullpen depth — est Aug 3 from 60-day IL
+    * IL return: Cooper Criswell          -0.022 RA/G         60-day IL — return date uncertain
+
+-- OPTIMISTIC IL — EVERYONE RETURNS EARLY --
+  RS/G: 4.17  RA/G: 3.41  Win%: 0.591  Luck wins: 1
+  Projected: 86-76  (0.531 win%)
+  Playoff: Division winner
+  vs TEX:  +3 games
+  vs HOU:  +7 games
+  Factors:
+    * IL return: Julio Rodriguez          +0.180 RS/G         Franchise CF, .337 xwOBA, 14 HR — est Jul 10
+    * IL return: Brendan Donovan          +0.133 RS/G         .839 OPS when healthy — est Jul 17
+    * IL return: Will Wilson              +0.036 RS/G         Bench depth — est Jul 20
+    * IL return: Matt Brash               -0.091 RA/G         0.54 ERA closer — est Jul 20 from 15-day IL
+    * IL return: Carlos Vargas            -0.039 RA/G         Bullpen depth — est Aug 3 from 60-day IL
+    * IL return: Cooper Criswell          -0.029 RA/G         60-day IL — return date uncertain
+    * Luck correction                                         Luck -2.0 → ~1 free wins
+
+-- PESSIMISTIC IL — SETBACKS, LATE RETURNS --
+  RS/G: 4.22  RA/G: 3.39  Win%: 0.599  Luck wins: 0
+  Projected: 86-76  (0.531 win%)
+  Playoff: Division winner
+  vs TEX:  +3 games
+  vs HOU:  +7 games
+  Factors:
+    * IL return: Julio Rodriguez          +0.164 RS/G         Franchise CF, .337 xwOBA, 14 HR — est Jul 10
+    * IL return: Brendan Donovan          +0.116 RS/G         .839 OPS when healthy — est Jul 17
+    * IL return: Will Wilson              +0.032 RS/G         Bench depth — est Jul 20
+    * IL return: Matt Brash               -0.074 RA/G         0.54 ERA closer — est Jul 20 from 15-day IL
+    * IL return: Carlos Vargas            -0.026 RA/G         Bullpen depth — est Aug 3 from 60-day IL
+    * IL return: Cooper Criswell          -0.014 RA/G         60-day IL — return date uncertain
+    * Acquired: Bryce Eldridge            +0.088 RS/G         NL power bat, .405 xwOBA, upside
+    * Acquired: Dylan Lee                 -0.066 RA/G         Elite .209 xwOBA, 1.52 ERA
+
+======================================================================
+NOTES:
+  * IL return dates are TEAM ESTIMATES — actual returns may vary
+  * HIGH confidence = 7-day IL, short stint
+  * MEDIUM confidence = 10-15 day IL
+  * LOW confidence = 60-day IL, longer recovery
+  * RS/G and RA/G impacts estimated from xwOBA differentials
+  * TEX projected ~83W, HOU ~79W based on current trajectory
+======================================================================
+
+
+-- CUSTOM SCENARIO: Just Eldridge + Lee --
+
+[simulate] Running deadline scenarios...
+[simulate] 10 scenarios complete.
+
+======================================================================
+SEATTLE MARINERS — DEADLINE ACQUISITION SIMULATOR
+As of: 2026-07-10  |  Record: 47-47
+Games remaining: 68  |  Luck: -2.0
+======================================================================
+
+-- SCENARIO SUMMARY --
+  Scenario                                       RS/G  RA/G  Win% Proj W    Final Playoff
+  ───────────────────────────────────────────────────────────────────────────────────────────────
+  Custom — Bryce Eldridge, Dylan Lee             4.25  3.36 0.606     40 87-75  Division winner
+
+-- CUSTOM — BRYCE ELDRIDGE, DYLAN LEE --
+  RS/G: 4.25  RA/G: 3.36  Win%: 0.606  Luck wins: 1
+  Projected: 87-75  (0.537 win%)
+  Playoff: Division winner
+  vs TEX:  +4 games
+  vs HOU:  +8 games
+  Factors:
+    * IL return: Julio Rodriguez          +0.180 RS/G         Franchise CF, .337 xwOBA, 14 HR — est Jul 10
+    * IL return: Brendan Donovan          +0.128 RS/G         .839 OPS when healthy — est Jul 17
+    * IL return: Will Wilson              +0.035 RS/G         Bench depth — est Jul 20
+    * IL return: Matt Brash               -0.088 RA/G         0.54 ERA closer — est Jul 20 from 15-day IL
+    * IL return: Carlos Vargas            -0.035 RA/G         Bullpen depth — est Aug 3 from 60-day IL
+    * IL return: Cooper Criswell          -0.022 RA/G         60-day IL — return date uncertain
+    * Acquired: Bryce Eldridge            +0.088 RS/G         NL power bat, .405 xwOBA, upside
+    * Acquired: Dylan Lee                 -0.066 RA/G         Elite .209 xwOBA, 1.52 ERA
+    * Luck correction                                         Luck -2.0 → ~1 free wins
+
+======================================================================
+NOTES:
+  * IL return dates are TEAM ESTIMATES — actual returns may vary
+  * HIGH confidence = 7-day IL, short stint
+  * MEDIUM confidence = 10-15 day IL
+  * LOW confidence = 60-day IL, longer recovery
+  * RS/G and RA/G impacts estimated from xwOBA differentials
+  * TEX projected ~83W, HOU ~79W based on current trajectory
+======================================================================

@@ -12,18 +12,26 @@ tg = recs.get("player_targets", {})
 bt = tg.get("batter_targets", [])
 pt = tg.get("pitcher_targets", [])
 
-print("\nBATTER TARGETS (sorted by xwOBA):")
-print(f"  {'Name':<25} {'Team':<22} {'Avail':<20} {'xwOBA':>6} {'Barrel%':>8} {'HR':>4} {'OPS':>6}")
+print(f"\nBATTER TARGETS — seller teams, xwOBA .310-.390:")
+print(f"  {'Name':<25} {'Team':<25} {'Avail':<20} {'xwOBA':>6} {'Barrel%':>8} {'HR':>4} {'OPS':>6}")
 print("  " + "-"*95)
-for p in bt:
-    print(f"  {str(p['name']):<25} {str(p['team']):<22} {str(p.get('availability','?')):<20} "
-          f"{str(p['xwOBA']):>6} {str(p.get('Barrel%','N/A')):>8} "
-          f"{str(p.get('HR','N/A')):>4} {str(p.get('OPS','N/A')):>6}")
+if bt:
+    for p in bt:
+        print(f"  {str(p['name']):<25} {str(p['team']):<25} "
+              f"{str(p.get('availability','?')):<20} "
+              f"{str(p['xwOBA']):>6} {str(p.get('Barrel%','N/A')):>8} "
+              f"{str(p.get('HR','N/A')):>4} {str(p.get('OPS','N/A')):>6}")
+else:
+    print("  No targets found")
 
-print("\nPITCHER TARGETS (sorted by xwOBA against):")
-print(f"  {'Name':<25} {'Team':<22} {'Avail':<20} {'G':>3} {'IP':>5} {'ERA':>5} {'xwOBA vs':>9}")
+print(f"\nPITCHER TARGETS — seller teams, xwOBA against <=.310:")
+print(f"  {'Name':<25} {'Team':<25} {'Avail':<20} {'G':>3} {'IP':>5} {'ERA':>5} {'xwOBA vs':>9}")
 print("  " + "-"*95)
-for p in pt:
-    print(f"  {str(p['name']):<25} {str(p['team']):<22} {str(p.get('availability','?')):<20} "
-          f"{str(p.get('G','N/A')):>3} {str(p.get('IP','N/A')):>5} "
-          f"{str(p.get('ERA','N/A')):>5} {str(p['xwOBA_against']):>9}")
+if pt:
+    for p in pt:
+        print(f"  {str(p['name']):<25} {str(p['team']):<25} "
+              f"{str(p.get('availability','?')):<20} "
+              f"{str(p.get('G','N/A')):>3} {str(p.get('IP','N/A')):>5} "
+              f"{str(p.get('ERA','N/A')):>5} {str(p['xwOBA_against']):>9}")
+else:
+    print("  No targets found")

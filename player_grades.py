@@ -1,5 +1,5 @@
 """
-player_grades.py
+player_grader.py
 Grades EVERY Seattle Mariners player using:
   - bbref batting/pitching/fielding as the primary source
   - Statcast xwOBA + Barrel% + HardHit% as supplement where available
@@ -66,6 +66,13 @@ DFA_CANDIDATES = {
     "Rivas":      "no role with Donovan/Emerson returning",
     "Wilcox":     "ERA 5.40, .408 xwOBA, replacement level",
     "Hoppe":      "ERA 6.46, replacement level reliever",
+}
+
+# players who should be optioned to AAA not DFA
+AAA_CANDIDATES = {
+    "Rucker":   "6.23 ERA, command issues — needs AAA time",
+    "Simpson":  "9.00 ERA, not ready for MLB",
+    "Gonzalez": "4.70 ERA, high WHIP — needs refinement",
 }
 
 # no hardcoded grades — trust scrapers only
@@ -283,6 +290,9 @@ def _pitcher_action(name: str, grade: str,
                     luck: float, era: float, role: str) -> str:
     if _is_dfa(name):
         return f"DFA — {_get_dfa_reason(name)}"
+    for k, v in AAA_CANDIDATES.items():
+        if k.lower() in name.lower():
+            return f"Option to AAA — {v}"
     # specific role overrides
     if "Brash" in name:
         return "Promote to closer — 0.60 ERA, elite"

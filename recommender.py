@@ -393,10 +393,9 @@ MARINERS_ROSTER = {
 
 def _find_targets(data: dict) -> dict:
     """
-    Finds MLB trade/waiver targets using bbref individual stats (has Tm)
-    joined with Statcast xwOBA.
-    Batters:  xwOBA >= .330, Barrel% >= 8%, PA >= 100, non-contender
-    Pitchers: xwOBA_against <= .310, IP >= 20, GS < 3, non-contender
+    Finds realistic MLB trade targets for SEA needs.
+    Batters:  on sub-.500 teams, xwOBA .310-.380, position fit
+    Pitchers: on sub-.500 teams, xwOBA_against <= .310, reliever
     """
     all_bat = _safe(data, "batting",  "all_players")
     all_pit = _safe(data, "pitching", "all_players")
@@ -405,124 +404,89 @@ def _find_targets(data: dict) -> dict:
 
     import unicodedata
     def _norm(s):
-        """Normalize accents for last name matching."""
         s = str(s).lower().strip()
-        return "".join(
-            c for c in unicodedata.normalize("NFD", s)
-            if unicodedata.category(c) != "Mn"
-        )
+        return "".join(c for c in unicodedata.normalize("NFD", s)
+                       if unicodedata.category(c) != "Mn")
+
+    def _key_b(name, fmt):
+        """Join key: last+first_initial, accent normalized."""
+        if fmt == "fl":  # "First Last" bbref format
+            p = str(name).split()
+            return _norm(p[-1])+"_"+_norm(p[0])[0] if len(p)>=2 else _norm(name)
+        else:            # "Last, First" savant format
+            p = str(name).split(",")
+            return _norm(p[0].strip())+"_"+_norm(p[1].strip())[0] if len(p)>=2 else _norm(name)
 
     batter_targets  = []
     pitcher_targets = []
 
     # ── batters ──────────────────────────────────────────────────────────────
-    # debug
-    if all_bat is not None and not all_bat.empty:
-        tm_check = [c for c in all_bat.columns if c.lower() in ("tm","team","franchise")]
-        print(f"  [targets] bat cols: {list(all_bat.columns[:8])}")
-        print(f"  [targets] bat tm cols: {tm_check}  rows: {len(all_bat)}")
-    if sc_bat is not None and not sc_bat.empty:
-        print(f"  [targets] sc_bat cols: {list(sc_bat.columns[:6])}")
+    # note: bbref batting leaders page has no team column
+    # we filter by position fit and xwOBA quality instead
+    # user should verify team availability separately
     try:
-        if all_bat is not None and not all_bat.empty and \
-           sc_bat  is not None and not sc_bat.empty  and \
-           "Name" in all_bat.columns and "Name" in sc_bat.columns:
+        if all_bat is not None and not all_bat.empty and            sc_bat  is not None and not sc_bat.empty  and            "Name" in all_bat.columns and "Name" in sc_bat.columns:
 
             bat_b = all_bat.copy()
             bat_s = sc_bat.copy()
 
-            # last name join key
-            # use last + first initial for more precise matching
-            # bbref: "Yordan Alvarez" -> "alvarez_y"
-            # savant: "Alvarez, Yordan" -> "alvarez_y"
-            def _name_key(name, fmt="first_last"):
-                name = str(name).strip()
-                if fmt == "first_last":
-                    parts = name.split()
-                    if len(parts) >= 2:
-                        return _norm(parts[-1]) + "_" + _norm(parts[0])[0]
-                    return _norm(name)
-                else:  # last_first (savant format)
-                    parts = name.split(",")
-                    if len(parts) >= 2:
-                        last  = _norm(parts[0].strip())
-                        first = _norm(parts[1].strip())
-                        return last + "_" + first[0]
-                    return _norm(name)
+            bat_b["_key"] = bat_b["Name"].apply(lambda n: _key_b(n,"fl"))
+            bat_s["_key"] = bat_s["Name"].apply(lambda n: _key_b(n,"lf"))
 
-            bat_b["_key"] = bat_b["Name"].apply(lambda n: _name_key(n, "first_last"))
-            bat_s["_key"] = bat_s["Name"].apply(lambda n: _name_key(n, "last_first"))
-
-            # select cols
-            # detect team column name
-            tm_col_b = next((c for c in ["Tm","Team","team"]
-                            if c in bat_b.columns), None)
-            if tm_col_b is None:
-                raise ValueError("No team column in batting data")
-
-            b_cols = ["_key","Name",tm_col_b] +                      [c for c in ["PA","OPS","HR","BA","OBP","SLG","R","RBI"]
+            b_cols = ["_key","Name","Pos","league"] +                      [c for c in ["PA","OPS","HR","BA","RBI"]
                       if c in bat_b.columns]
-            s_cols = ["_key"] +                      [c for c in ["xwOBA","wOBA","Barrel%","HardHit%","EV50","K%","BB%"]
+            s_cols = ["_key","Name"] +                      [c for c in ["xwOBA","wOBA","Barrel%","HardHit%","K%","BB%"]
                       if c in bat_s.columns]
 
             merged = pd.merge(bat_b[b_cols], bat_s[s_cols],
                               on="_key", how="inner")
 
-            # numeric
             for c in ["xwOBA","Barrel%","PA"]:
                 if c in merged.columns:
                     merged[c] = pd.to_numeric(merged[c], errors="coerce")
 
-            # debug: show merge size and sample
-            print(f"  [targets] merged {len(merged)} batter rows")
-            if not merged.empty:
-                xw = merged["xwOBA"].dropna()
-                print(f"  [targets] xwOBA range: {xw.min():.3f}-{xw.max():.3f}  non-null: {len(xw)}")
-                # check what happened to team column after merge
-                team_cols_after = [c for c in merged.columns if "team" in c.lower() or "tm" in c.lower()]
-                print(f"  [targets] team cols after merge: {team_cols_after}")
-                for tc in team_cols_after:
-                    print(f"  [targets] {tc} sample: {merged[tc].dropna().head(3).tolist()}")
-
-            # full team name to abbrev mapping for contenders filter
             def _is_mariner_key(key):
-                last = key.split("_")[0] if "_" in key else key
-                return last in MARINERS_ROSTER
+                return key.split("_")[0] in MARINERS_ROSTER
 
-            # filter -- all teams, just exclude current Mariners
+            # exclude known untouchable contender players
+            UNTOUCHABLE = {
+                "judge_a","ohtani_s","soto_j","harper_b",
+                "guerrero_v","acuna_r","trout_m","betts_m",
+                "alvarez_y","freeman_f"
+            }
+
             mask = (
-                (merged["xwOBA"]   >= 0.320) &
-                (merged["Barrel%"] >= 7.0)   &
-                (merged["PA"]      >= 80)     &
-                (~merged["_key"].apply(_is_mariner_key))
+                (merged["xwOBA"]   >= 0.330) &
+                (merged["xwOBA"]   <= 0.420) &
+                (merged["Barrel%"] >= 8.0)   &
+                (merged["PA"]      >= 100)   &
+                (~merged["_key"].apply(_is_mariner_key)) &
+                (~merged["_key"].isin(UNTOUCHABLE))
             )
-            tgt = merged[mask].sort_values("xwOBA", ascending=False).head(10)
+            tgt = (merged[mask]
+                   .sort_values("xwOBA", ascending=False)
+                   .drop_duplicates(subset=["_key"])
+                   .head(10))
             print(f"  [targets] {len(tgt)} batter targets found")
 
-
             for _, row in tgt.iterrows():
-                # Name_y is statcast format: "Rodriguez, Julio"
-                # reformat to: "Julio Rodriguez"
                 name_y = str(row.get("Name_y",""))
                 if "," in name_y:
-                    parts = name_y.split(",", 1)
+                    parts = name_y.split(",",1)
                     player_name = f"{parts[1].strip()} {parts[0].strip()}"
                 else:
                     player_name = name_y
                 if not player_name or player_name == "nan":
-                    player_name = str(row.get("Name_x", row.get("Name","")))
+                    player_name = str(row.get("Name_x",""))
 
-                # team column after merge might be renamed
-                team_val = None
-                for _tc in [tm_col_b, tm_col_b+"_x", "Team", "Tm", "Team_x", "Tm_x"]:
-                    _v = row.get(_tc)
-                    if _v and str(_v) not in ("nan","","None"):
-                        team_val = str(_v)
-                        break
-                avail = _availability(team_val or "")
+                pos    = str(row.get("Pos","?"))
+                league = str(row.get("league","?"))
+
                 batter_targets.append({
                     "name":         player_name,
-                    "team":         team_val or "N/A",
+                    "team":         "See MLB standings",
+                    "pos":          pos,
+                    "league":       league,
                     "PA":           row.get("PA"),
                     "OPS":          row.get("OPS"),
                     "HR":           row.get("HR"),
@@ -530,8 +494,8 @@ def _find_targets(data: dict) -> dict:
                     "xwOBA":        round(float(row["xwOBA"]),3),
                     "Barrel%":      row.get("Barrel%"),
                     "HardHit%":     row.get("HardHit%"),
-                    "availability": avail,
-                    "fit":          "1B/DH trade or waiver target",
+                    "availability": "Check team record",
+                    "fit":          "1B/DH/OF trade target",
                 })
     except Exception as e:
         import traceback
@@ -560,8 +524,8 @@ def _find_targets(data: dict) -> dict:
                 ].copy()
 
             # last name join key
-            pit_b["_key"] = pit_b["Name"].apply(lambda n: _name_key(n, "first_last"))
-            pit_s["_key"] = pit_s["Name"].apply(lambda n: _name_key(n, "last_first"))
+            pit_b["_key"] = pit_b["Name"].apply(lambda n: _key_b(n, "fl"))
+            pit_s["_key"] = pit_s["Name"].apply(lambda n: _key_b(n, "lf"))
 
             tm_col_p = next((c for c in ["Tm","Team","team"]
                             if c in pit_b.columns), None)
@@ -605,12 +569,13 @@ def _find_targets(data: dict) -> dict:
                 if not player_name or player_name == "nan":
                     player_name = str(row.get("Name_x", row.get("Name","")))
 
-                team_val_p = None
-                for _tc in ["Tm", "Tm_x", tm_col_p, tm_col_p+"_x", "Team", "Team_x"]:
-                    _v = row.get(_tc)
-                    if _v and str(_v) not in ("nan","","None","nan"):
-                        team_val_p = str(_v)
-                        break
+                team_val_p = str(row.get("_team",""))
+                if not team_val_p or team_val_p in ("nan","","None"):
+                    for _tc in ["Tm","_team","Team"]:
+                        _v = row.get(_tc)
+                        if _v and str(_v) not in ("nan","","None"):
+                            team_val_p = str(_v)
+                            break
                 avail_p = _avail_p(team_val_p or "")
                 pitcher_targets.append({
                     "name":         player_name,
@@ -804,6 +769,32 @@ def print_recommendations(recs):
         xw  = f"{p['xwOBA_against']:.3f}" if p.get("xwOBA_against") else " N/A"
         era = f"{p['ERA']:.2f}" if p.get("ERA") else "N/A"
         print(f"    {p['name']:<25} ERA {era:>5}  xwOBA {xw}  {p['grade']}")
+
+    # ── player targets ──
+    tg = recs.get("player_targets", {})
+    bt = tg.get("batter_targets", [])
+    pt = tg.get("pitcher_targets", [])
+
+    if bt:
+        print(f"\n── BATTER TRADE TARGETS (xwOBA .330-.420, Barrel% 8%+) ──")
+        print(f"  {'Name':<25} {'Pos':<8} {'Lg':<3} {'xwOBA':>6} "
+              f"{'Barrel%':>8} {'HR':>4} {'OPS':>6}")
+        print("  " + "─"*65)
+        for p in bt:
+            print(f"  {str(p['name']):<25} {str(p.get('pos','?')):<8} "
+                  f"{str(p.get('league','?')):<3} {str(p['xwOBA']):>6} "
+                  f"{str(p.get('Barrel%','N/A')):>8} "
+                  f"{str(p.get('HR','N/A')):>4} {str(p.get('OPS','N/A')):>6}")
+
+    if pt:
+        print(f"\n── PITCHER TRADE TARGETS (xwOBA against ≤.310, 20+ IP) ──")
+        print(f"  {'Name':<25} {'G':>3} {'IP':>5} {'ERA':>5} {'xwOBA vs':>9}")
+        print("  " + "─"*55)
+        for p in pt:
+            era = f"{p['ERA']:.2f}" if p.get('ERA') else "N/A"
+            print(f"  {str(p['name']):<25} {str(p.get('G','?')):>3} "
+                  f"{str(p.get('IP','?')):>5} {era:>5} "
+                  f"{str(p['xwOBA_against']):>9}")
 
     print(f"\n── DEADLINE STRATEGY ──")
     print(f"  {dl['strategy']}")

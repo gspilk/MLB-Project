@@ -620,9 +620,95 @@ def _sheet_targets(wb: Workbook, targets: dict):
         _cell(ws, r, 9, p.get("fit",""), color=color)
         r += 1
 
+# ── sheet: simulation ─────────────────────────────────────────────────────────
+def _sheet_simulation(wb, scenarios: dict):
+    from simulator import project_division
+    ws = wb.create_sheet("Deadline Simulation")
+    ws.sheet_view.showGridLines = False
+    _set_col_widths(ws, [48, 7, 7, 7, 8, 10, 25])
+
+    r = 1
+    _title(ws, r, "DEADLINE ACQUISITION SIMULATOR", 7)
+    r += 1
+
+    _subtitle(ws, r, "SCENARIO SUMMARY", 7)
+    r += 1
+    headers = ["Scenario", "RS/G", "RA/G", "Win%", "Proj W", "Final", "Playoff"]
+    for i, h in enumerate(headers, 1):
+        _header(ws, r, i, h, size=10)
+    r += 1
+
+    PLAYOFF_COLORS = {
+        "division winner":       GREEN,
+        "wild card 1":           "C8E6C9",
+        "wild card 2":           "DCEDC8",
+        "wild card 3":           YELLOW,
+        "bubble":                YELLOW,
+        "miss":                  RED,
+    }
+
+    for key, s in scenarios.items():
+        div   = project_division(s["final_w"])
+        pos   = div["playoff_position"]
+        color = next((v for k, v in PLAYOFF_COLORS.items()
+                      if k in pos.lower()), LGRAY)
+        _cell(ws, r, 1, s["name"],      bold=True, color=color)
+        _cell(ws, r, 2, s["rs_g"],      color=color, align="center", fmt="0.00")
+        _cell(ws, r, 3, s["ra_g"],      color=color, align="center", fmt="0.00")
+        _cell(ws, r, 4, s["win_pct"],   color=color, align="center", fmt="0.000")
+        _cell(ws, r, 5, s["proj_wins"], color=color, align="center")
+        _cell(ws, r, 6, f"{s['final_w']}-{s['final_l']}", color=color, align="center")
+        _cell(ws, r, 7, pos,            color=color)
+        r += 1
+
+    r += 1
+
+    # detail each scenario
+    for key, s in scenarios.items():
+        div = project_division(s["final_w"])
+        _subtitle(ws, r, s["name"].upper(), 7, bg=TEAL)
+        r += 1
+
+        for label, val in [
+            ("RS/G",      s["rs_g"]),
+            ("RA/G",      s["ra_g"]),
+            ("Win%",      s["win_pct"]),
+            ("Luck wins", s["luck_wins"]),
+            ("Final W-L", f"{s['final_w']}-{s['final_l']}"),
+            ("Playoff",   div["playoff_position"]),
+            ("vs TEX",    f"{div['gap_to_tex']:+d} games"),
+            ("vs HOU",    f"{div['games_ahead_hou']:+d} games"),
+        ]:
+            _cell(ws, r, 1, label, bold=True, color=LGRAY)
+            ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=7)
+            c = ws.cell(row=r, column=2, value=val)
+            c.font = Font(name="Arial", size=10)
+            c.fill = PatternFill("solid", start_color=LGRAY)
+            r += 1
+
+        if s.get("impacts"):
+            for i, h in enumerate(["Factor","RS/G impact","RA/G impact","Note"], 1):
+                _header(ws, r, i, h, bg=DGRAY, fg="000000", size=10)
+            r += 1
+            for imp in s["impacts"]:
+                rs_c = GREEN if imp["rs"] > 0 else LGRAY
+                ra_c = GREEN if imp["ra"] < 0 else LGRAY
+                _cell(ws, r, 1, imp["source"], bold=True, color=LGRAY)
+                _cell(ws, r, 2,
+                      f"+{imp['rs']:.3f}" if imp["rs"] > 0 else "-",
+                      color=rs_c, align="center")
+                _cell(ws, r, 3,
+                      f"{imp['ra']:.3f}" if imp["ra"] < 0 else "-",
+                      color=ra_c, align="center")
+                _cell(ws, r, 4, imp["note"], color=LGRAY)
+                r += 1
+        r += 1
+
+
 # ── main generate function ────────────────────────────────────────────────────
 def generate_report(data: dict, analysis: dict,
                     grades: dict, recs: dict,
+                    scenarios: dict = None,
                     output_path: str = None) -> str:
     """
     Generates the Excel report.
@@ -649,6 +735,8 @@ def generate_report(data: dict, analysis: dict,
     _sheet_moves(wb, im, dl)
     _sheet_targets(wb, recs.get("player_targets", {}))
     _sheet_schedule(wb, data)
+    if scenarios:
+        _sheet_simulation(wb, scenarios)
 
     wb.save(path)
     print(f"[report] Saved: {path}")

@@ -1,0 +1,613 @@
+PS C:\Users\geoff\OneDrive\Desktop\MLB PROJECT> python main.py --refresh                                                                                       
+               
+=================================================================
+  SEATTLE MARINERS MIDSEASON ANALYZER
+  2026-07-10
+  Data source: Baseball Reference (bbref.com)
+  Note: bbref updates 6-24 hours after games
+=================================================================
+
+STEP 1/6 -- Building data...
+
+==================================================
+Building MLB data for 2026 season...
+==================================================
+
+[build] standings ...
+[fetch] standings 2026 ...
+  [GET] https://www.baseball-reference.com/leagues/majors/2026-standings.shtml
+  [ok]   AL_East: 5 teams
+  [ok]   AL_Central: 5 teams
+  [ok]   AL_West: 5 teams
+  [ok]   NL_East: 5 teams
+  [ok]   NL_Central: 5 teams
+  [ok]   NL_West: 5 teams
+  [ok]   expanded standings: 30 teams, 28 cols
+[build] schedule ...
+[fetch] schedule 2026 ...
+  [GET] https://www.baseball-reference.com/teams/SEA/2026-schedule-scores.shtml
+  [ok]   schedule: 162 total games
+  [ok]   completed: 94 games
+  [ok]   next 7:    7 games
+  [ok]   remaining: 61 games
+[build] seattle stats ...
+[fetch] seattle stats 2026 from bbref ...
+  [GET] https://www.baseball-reference.com/teams/SEA/2026.shtml
+  [ok]   batting: 23 players, 33 cols
+  [ok]   pitching: 20 players, 36 cols
+  [ok]   fielding: 46 players, 29 cols
+  [ok]   value batting: 23 players, 21 cols
+  [ok]   value pitching: 20 players, 23 cols
+  [ok]   40-man roster: 44 players, 14 cols
+[build] batting leaders ...
+[fetch] batting leaders 2026 ...
+  [GET] https://www.baseball-reference.com/leagues/AL/2026-standard-batting.shtml
+  [ok]   AL batting teams:   15 teams
+  [ok]   AL batting players: 348 players
+  [GET] https://www.baseball-reference.com/leagues/NL/2026-standard-batting.shtml
+  [ok]   NL batting teams:   15 teams
+  [ok]   NL batting players: 339 players
+[build] pitching leaders ...
+[fetch] pitching leaders 2026 ...
+  [GET] https://www.baseball-reference.com/leagues/AL/2026-standard-pitching.shtml
+  [ok]   AL pitching teams:   15 teams
+  [ok]   AL pitching players: 388 players
+  [GET] https://www.baseball-reference.com/leagues/NL/2026-standard-pitching.shtml
+  [ok]   NL pitching teams:   15 teams
+  [ok]   NL pitching players: 401 players
+[build] MLB overview ...
+[fetch] MLB overview 2026 ...
+  [GET] https://www.baseball-reference.com/leagues/majors/2026.shtml
+  [ok]   batting: 30 teams, 29 cols
+  [ok]   pitching: 30 teams, 36 cols
+  [ok]   fielding: 30 teams, 19 cols
+  [ok]   WAR by position: 30 rows, 33 cols
+[build] statcast ...
+[load] statcast batters ...
+  [ok]  504 batters, 15 cols
+[load] statcast pitchers ...
+  [ok]  639 pitchers, 15 cols
+
+==================================================
+All data built in 38.9s
+==================================================
+
+
+STEP 2/6 -- Analyzing team...
+
+[analyze] Running team analysis...
+[analyze] Done.
+
+STEP 3/6 -- Grading players...
+
+[grade] Grading ALL Mariners players...
+[grade] 23 batters, 20 pitchers graded.
+
+STEP 4/6 -- Generating recommendations...
+
+[recommend] Generating recommendations...
+  [targets] 10 batter targets found
+  [debug] pitcher merge cols with team: ['Name', 'Tm']
+  [targets] 10 pitcher targets found
+[recommend] Done.
+
+STEP 5/6 -- Running deadline simulation...
+  [sim] Record 47-47  RS/G 4.05  RA/G 3.84  Luck -2.0
+
+[simulate] Running deadline scenarios...
+[simulate] 9 scenarios complete.
+
+STEP 6/6 -- Generating Excel report...
+
+[report] Generating Excel report...
+[report] Saved: C:\Users\geoff\OneDrive\Desktop\MLB PROJECT\output\mariners_report_20260710.xlsx
+
+============================================================
+SEATTLE MARINERS — MIDSEASON ANALYSIS
+Generated: 2026-07-10
+============================================================
+
+── OVERALL GRADE: B ──
+  Verdict:        Wild card contender
+  Offense:        Average
+  Rotation:       Above Average
+  Bullpen:        Unknown
+  Projected wins: 79
+  Range:          76—83 wins
+  Deadline:       Minor buyer — elite pitching, add depth
+
+── STANDINGS ──
+  Record:         47-47
+  Win %:          0.5
+  Division rank:  2 of 5
+  MLB rank:       14 of 30
+  WC gap:         0.0
+  Luck:           -2.0
+  Pythag W-L:     49-45
+  1-run record:   13-16
+  vs LHP:         12-13
+  Last 10:        5-5
+  Last 30:        14-16
+
+── OFFENSE ──
+  Grade:          Average
+  Avg xwOBA:      0.317
+  OPS rank:       25/30
+  HR rank:        13/30
+  ✗ Run scoring: rank 26/30
+  → 6 batters unlucky — offense will improve
+  → 2 batters lucky — minor regression expected
+
+── PITCHING ──
+  Rotation grade: Above Average
+  Bullpen grade:  Unknown
+  Team ERA:       3.57
+  ERA rank:       4/30
+  ⚠ Alex Hoppe (40-man): ERA 6.38 reliever — 24.0 IP, 21 appearances
+  ⚠ Nick Davila: BB/9 5.6 — walk rate elevated
+  ⚠ Cole Wilcox: BB/9 7.3 — walk rate elevated
+  ⚠ Michael Rucker: ERA 6.75 reliever — 10.2 IP, 10 appearances
+  → 2 pitchers unlucky — ERA will drop
+  → 5 pitchers lucky — ERA will rise slightly
+
+── SCHEDULE ──
+  Games remaining: 61
+  Easy games:      24
+  Hard games:      15
+
+  Next 7 games:
+    ☐ 2026-07-10  away  TBR
+    ☐ 2026-07-11  away  TBR
+    ☐ 2026-07-12  away  TBR
+    ☐ 2026-07-17  home  SFG
+    ☐ 2026-07-18  home  SFG
+    ☐ 2026-07-19  home  SFG
+    ☐ 2026-07-20  home  CIN
+
+── ROSTER HEALTH ──
+  On IL:          Leo Rivas (7-day IL), Julio Rodríguez (7-day IL), Rob Refsnyder (10-day IL), Brendan Donovan (10-day IL), Will Wilson (60-day IL)
+  Returning soon: Brendan Donovan (10-day IL)
+  DFA candidate:  Rivas, Leo (xwOBA 0.239, 120 PA)
+  DFA candidate:  Refsnyder, Rob (xwOBA 0.254, 90 PA)
+
+============================================================
+
+
+================================================================================
+SEATTLE MARINERS — FULL ROSTER GRADES
+================================================================================
+
+── BATTERS (23) ──
+Name                         Grade                       PA   OPS  xwOBA   Luck  HR  WAR  Action
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Luke Raley                   Elite                      253 0.760  0.377 -0.002  14  0.4  Keep — core piece  [Elite power: 19.2% Barrel | Above avg power: 19.2% Barrel]
+Jhonny Pereda (40-man)       Elite                       68 0.689  0.390 -0.040   2  0.1  Keep — core piece  [UNLUCKY -0.040 — improvement expected]
+Will Wilson (60-day IL)      Elite                        6 1.133    N/A    N/A   1  2.4  IL — evaluate when healthy
+J.P. Crawford                Above Average              322 0.675  0.354 -0.012  10  0.4  IL — evaluate when healthy
+Randy Arozarena              Above Average              366 0.835  0.341 +0.016  10  3.0  Keep — valuable contributor
+Dominic Canzone              Above Average              246 0.885  0.365    N/A  15  1.7  Keep — valuable contributor  [Elite power: 15.8% Barrel | Above avg power: 15.8% Barrel | 15 HR — power producing]
+Brendan Donovan (10-day IL)  Above Average              101 0.839  0.345 +0.029   3  0.6  IL — evaluate when healthy
+Connor Joe (40-man)          Above Average               45 0.597  0.369 -0.073   1  0.1  Keep — valuable contributor  [UNLUCKY -0.073 — improvement expected]
+Josh Naylor                  Average                    376 0.665  0.329 -0.033   8 -0.2  Keep — unlucky, improvement coming  [UNLUCKY -0.033 — improvement expected]
+Cole Young                   Average                    373 0.700  0.329 -0.022  10  2.9  Keep — pre-arb — emerging star
+Julio Rodríguez (7-day IL)   Average                    378 0.747    N/A    N/A  14  2.4  Keep — 10yr/$210M — franchise player
+Cal Raleigh                  Below Average — developing  267 0.581  0.289 -0.036   9 -0.1  Keep — extension — franchise catcher  [UNLUCKY -0.036 — improvementexpected | Above avg power: 12.3% Barrel]
+Colt Emerson                 Below Average — developing  156 0.686  0.262 +0.118   7  0.6  Keep — 8yr/$95M — franchise cornerstone — never DFA  [LUCKY +0.118 — regression expected]
+Mitch Garver                 Below Average              124 0.650  0.295 +0.001   4  0.4  Consider replacement  [Elite contact: 54.2% HardHit]
+Leo Rivas (7-day IL)         DFA                        120 0.434    N/A    N/A   0  2.4  DFA — no role with Donovan/Emerson returning
+Rob Refsnyder (10-day IL)    DFA                        119 0.422  0.254 -0.062   3 -1.0  DFA — no role with Robles/Canzone/Raley healthy  [UNLUCKY -0.062 — improvement expected]
+Víctor Robles                DFA                         98 0.517    N/A    N/A   0 -0.4  DFA — below replacement level
+Patrick Wisdom (40-man)      DFA                         44 0.401  0.263 -0.002   1 -0.6  DFA — below replacement level  [Elite power: 20.0% Barrel | Above avg power: 20.0% Barrel | Elite contact: 70.0% HardHit]
+Miles Mastrobuoni            DFA                         27 0.487    N/A    N/A   0 -0.1  Monitor — small sample, limited role
+Weston Wilson                DFA                         14 0.286    N/A    N/A   0  N/A  IL — evaluate when healthy
+Ryan Bliss (40-man)          DFA                         10 0.325    N/A    N/A   0  N/A  Depth piece — insufficient sample
+Buddy Kennedy                DFA                          1   N/A    N/A    N/A   0  N/A  Depth piece — insufficient sample
+Gabe Speier                  Unknown                      0   nan    N/A    N/A   0  N/A  Monitor
+
+── PITCHERS (20) ──
+Name                         Rol Grade                   IP   ERA  WHIP  K/9  xwOBA   Luck  WAR  Action
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Bryce Miller                 SP  Elite                 57.2  2.18 0.832 10.2  0.221 +0.017  2.0  Give more starts — xwOBA top 3% MLB  [ERA 2.18 misleading — xwOBA 0.221 better | Elite K/9: 10.2 | High WAR: 2.0]
+Jose A. Ferrer               CL  Elite                 38.0  2.37 1.289  7.6  0.242 +0.053  1.0  Keep — core piece  [ERA 2.37 misleading — xwOBA 0.242 better]
+George Kirby                 SP  Above Average        110.0  3.76 1.318  8.0  0.296 +0.016  1.5  Monitor — K rate declined, piggyback with Miller  [ERA 3.76 misleading — xwOBA 0.296 better | High WAR: 1.5]
+Logan Gilbert                SP  Above Average        107.1  3.19 0.950  9.6  0.317 +0.001  2.5  Keep — valuable  [High WAR: 2.5]
+Bryan Woo                    SP  Above Average        104.1  4.23 1.073  8.8  0.272 -0.019  0.9  Keep — valuable  [ERA 4.23 misleading — xwOBA 0.272 better]
+Emerson Hancock              SP  Above Average         97.2  3.23 1.014  8.5  0.321 -0.046  2.2  Keep — valuable  [High WAR: 2.2]
+Eduard Bazardo               RP  Above Average         39.1  2.06 1.246  8.5  0.330 -0.010  1.1  Keep — valuable
+Cooper Criswell (60-day IL)  RP  Above Average         30.2  3.52 1.174  6.9  0.317 +0.001  2.5  Keep — valuable  [ERA 3.52 misleading — xwOBA 0.317 better | High WAR: 2.5]
+Gabe Speier                  RP  Above Average         23.0  1.96 1.174  7.4  0.318 -0.003  0.9  Keep — valuable
+Nick Davila                  RP  Above Average         16.2  2.16 1.140  5.0  0.347 -0.096  0.4  Keep — valuable  [High BB/9: 5.6 — command concern]
+Matt Brash (15-day IL)       RP  Above Average         16.2  0.54 0.840  8.3  0.308 -0.095  0.9  Promote to closer — 0.60 ERA, elite  [ERA 0.54 may rise — xwOBA 0.308 concerning]
+Andrés Muñoz                 CL  Average               33.1  4.32 1.290 13.3  0.323 -0.011  N/A  Role change — move to setup, Brash to close  [ERA 4.32 misleading — xwOBA 0.323 better | Elite K/9: 13.3 | Elite Whiff%: 42.6%]
+Luis Castillo                SP  Below Average         82.2  4.79 1.331  8.4  0.351 -0.008 -0.5  Keep in 6-man — ERA trending down  [ERA 4.79 misleading — xwOBA 0.351 better]
+Alex Hoppe (40-man)          RP  Below Average         24.0  6.38 1.458  9.8  0.321 -0.029 -0.4  DFA — ERA 6.46, replacement level reliever  [ERA 6.38 misleading — xwOBA 0.321 better]
+Cole Wilcox                  RP  Below Average         16.0  4.50 1.875  9.0  0.408 -0.026  N/A  DFA — ERA 5.40, .408 xwOBA, replacement level  [High BB/9: 7.3 — command concern]
+Casey Legumina               RP  Below Average         11.2  4.63 1.543  7.2  0.326 +0.023  N/A  Consider replacement  [ERA 4.63 misleading — xwOBA 0.326 better]
+Michael Rucker               RP  Below Average         10.2  6.75 1.500 10.6    N/A    N/A -0.2  Option to AAA — 6.23 ERA, command issues — needs AAA time  [Elite K/9: 10.6]
+Domingo González             RP  Below Average          7.2  4.70 1.826  6.2    N/A    N/A  N/A  Consider replacement
+Josh Simpson (40-man)        RP  Small sample           3.0  9.00 2.000  9.0    N/A    N/A -0.2  Option to AAA — 9.00 ERA, not ready for MLB
+José Suarez                  RP  Small sample           2.0  4.50 2.000 13.5    N/A    N/A  N/A  Monitor
+
+── SUMMARY ──
+  Total players:  23 batters, 20 pitchers
+  Elite:          Luke Raley, Jhonny Pereda (40-man), Will Wilson (60-day IL), Bryce Miller, Jose A. Ferrer
+  DFA candidates: Leo Rivas (7-day IL), Rob Refsnyder (10-day IL), Víctor Robles, Patrick Wisdom (40-man), Alex Hoppe (40-man), Cole Wilcox
+  Concerns:       George Kirby, Andrés Muñoz
+  Grade dist:     {'DFA': 8, 'Small sample': 2, 'Elite': 5, 'Average': 4, 'Unknown': 1, 'Above Average': 14, 'Below Average': 9}
+
+================================================================================
+
+
+=================================================================
+SEATTLE MARINERS — RECOMMENDATIONS
+Generated: 2026-07-10
+=================================================================
+
+── TEAM DIAGNOSIS ──
+  Grade:          B — Wild card contender
+  Record:         47-47  div 2/5  MLB 14/30
+  Offense:        Average
+  Rotation:       Above Average  ERA 3.57  rank 4/30
+  Bullpen:        Unknown
+  Luck:           -2.0  Pythag: 49-45
+  1-run / vLHP:   13-16 / 12-13
+  Last 10/30:     5-5 / 14-16
+  Proj wins:      79  (76—83)
+  Deadline:       Minor buyer — elite pitching, add depth
+  Games left:     61  easy 24  hard 15
+
+── STATS TO IMPROVE ──
+  HIGH PRIORITY:
+    Offense        OBP        rank 22/30  0.311  ✓ internal
+      → Crawford 14.7 BB% returning — OBP will jump immediately
+    WAR by Position SS WAR     rank 23/30  -0.4  ✓ internal
+      → Crawford returns from IL — .354 xwOBA, elite OBP
+    WAR by Position C WAR      rank 24/30  -0.9  ✓ internal
+      → Raleigh returns from IL — fixes this immediately
+    Offense        RBI        rank 25/30  367  → external
+      → RISP production improves with Donovan + Raleigh returning
+    Offense        OPS        rank 25/30  0.691  → external
+      → Full health lineup projects top 5 AL — internal fix available
+    Offense        R          rank 26/30  381  → external
+      → Donovan + Raleigh returning — run production will improve
+    Offense        H          rank 27/30  716  → external
+      → Contact rate improving — Crawford return helps
+    Offense        BA         rank 27/30  0.23  → external
+      → Three true outcomes team — by design, power offsets BA
+    Offense        SLG        rank 28/30  0.38  → external
+      → Raley 19.2 Barrel% + Raleigh power returning — SLG improving
+    WAR by Position 1B WAR     rank 28/30  -1.6  → external
+      → Naylor below average — potential deadline upgrade target
+  MONITOR:
+    Offense        BB         rank 17/30  315
+    Fielding       Rtot       rank 17/30  -4
+    Fielding       DefEff     rank 17/30  0.696
+    Fielding       E          rank 17/30  48
+    Offense        HR         rank 18/30  112
+    WAR by Position 3B WAR     rank 19/30  -0.7
+    WAR by Position RF WAR     rank 19/30  -1.0
+    Offense        OPS+       rank 20/30  98
+
+── IMMEDIATE ROSTER MOVES ──
+  [IMMEDIATE ] DFA          Leo Rivas (7-day IL)
+                   → no role with Donovan/Emerson returning
+  [IMMEDIATE ] DFA          Rob Refsnyder (10-day IL)
+                   → no role with Robles/Canzone/Raley healthy
+  [IMMEDIATE ] DFA          Víctor Robles
+                   → below replacement level
+  [IMMEDIATE ] DFA          Patrick Wisdom (40-man)
+                   → below replacement level
+  [IMMEDIATE ] DFA          Alex Hoppe (40-man)
+                   → ERA 6.46, replacement level reliever
+  [IMMEDIATE ] DFA          Cole Wilcox
+                   → ERA 5.40, .408 xwOBA, replacement level
+  [SOON      ] PIGGYBACK    George Kirby
+                   → Monitor — K rate declined, piggyback with Miller
+  [IMMEDIATE ] ROLE CHANGE  Andrés Muñoz
+                   → Role change — move to setup, Brash to close
+  [IMMEDIATE ] ROLE CHANGE  Matt Brash (15-day IL)
+                   → Promote to closer — 0.60 ERA, elite
+  [WHEN READY] ACTIVATE     Brendan Donovan (10-day IL)
+                   → Returning from IL — key contributor
+
+── OPTIMAL LINEUP (by xwOBA, active only) ──
+  1. Jhonny Pereda (40-man)    xwOBA 0.390  OPS 0.689  HR 2
+  2. Luke Raley                xwOBA 0.377  OPS 0.760  HR 14
+  3. Dominic Canzone           xwOBA 0.365  OPS 0.885  HR 15
+  4. Randy Arozarena           xwOBA 0.341  OPS 0.835  HR 10
+  5. Josh Naylor               xwOBA 0.329  OPS 0.665  HR 8
+  6. Cole Young                xwOBA 0.329  OPS 0.700  HR 10
+  7. Mitch Garver              xwOBA 0.295  OPS 0.650  HR 4
+  8. Colt Emerson              xwOBA 0.262  OPS 0.686  HR 7
+
+── ROTATION (by xwOBA) ──
+  1. Bryce Miller              ERA  2.18  xwOBA 0.221  Give more starts — xwOBA top 3% MLB
+  2. Bryan Woo                 ERA  4.23  xwOBA 0.272  Keep — valuable
+  3. George Kirby              ERA  3.76  xwOBA 0.296  Monitor — K rate declined, piggyback with Miller
+  4. Logan Gilbert             ERA  3.19  xwOBA 0.317  Keep — valuable
+  5. Emerson Hancock           ERA  3.23  xwOBA 0.321  Keep — valuable
+  6. Luis Castillo             ERA  4.79  xwOBA 0.351  Keep in 6-man — ERA trending down
+  Piggyback: Kirby + Miller — limit Kirby to 4 IP, Miller finishes
+  6th man:   Luis Castillo — ERA trending down in 6-man role
+
+── BULLPEN HIERARCHY ──
+  Closer:        Matt Brash — 0.60 ERA, promote immediately
+  Setup:         Andrés Muñoz — move from closer, fix curveball
+  High leverage: José Ferrer — xwOBA .242, unlucky, elite
+    Jose A. Ferrer            ERA  2.37  xwOBA 0.242  Elite
+    Matt Brash (15-day IL)    ERA  0.54  xwOBA 0.308  Above Average
+    Cooper Criswell (60-day IL) ERA  3.52  xwOBA 0.317  Above Average
+    Gabe Speier               ERA  1.96  xwOBA 0.318  Above Average
+    Alex Hoppe (40-man)       ERA  6.38  xwOBA 0.321  Below Average
+    Andrés Muñoz              ERA  4.32  xwOBA 0.323  Average
+
+── BATTER TRADE TARGETS (xwOBA .330-.420, Barrel% 8%+) ──
+  Name                      Pos      Lg   xwOBA  Barrel%   HR    OPS
+  ─────────────────────────────────────────────────────────────────
+  Drake Baldwin             2D/H     NL   0.418     18.6 15.0  0.789
+  Dillon Dingler            *2D/H    AL   0.409     14.0 19.0  0.841
+  Bryce Eldridge            D3/H     NL   0.405     11.5  8.0  0.843
+  Ben Rice                  3D/H     AL   0.402     17.1 28.0  0.956
+  JJ Bleday                 7/DH9    NL   0.399     14.0 14.0  0.825
+  Miguel Vargas             *53/DH   AL   0.397     14.8 20.0  0.832
+  Nick Kurtz                *3/DH    AL   0.396     18.2 20.0  0.902
+  Willson Contreras         *2D/H    NL   0.395     14.3  9.0   0.74
+  Ryan Jeffers              2/DH     AL   0.389     15.8  7.0  0.949
+  Shea Langeliers           *2D      AL   0.389     15.4 20.0  0.817
+
+── PITCHER TRADE TARGETS (xwOBA against ≤.310, 20+ IP) ──
+  Name                        G    IP   ERA  xwOBA vs
+  ───────────────────────────────────────────────────────
+  Dylan Lee                 43.0  41.1  1.52     0.209
+  Louis Varland             43.0  48.0  0.94     0.216
+  Brandyn Garcia            26.0  22.0  2.05     0.225
+  Raisel Iglesias           30.0  31.1  2.30     0.227
+  Dylan Dodd                21.0  26.0  2.08     0.229
+  Rico Garcia               42.0  39.1  2.75     0.231
+  Juan Morillo              39.0  35.1  3.06     0.235
+  Evan Sisk                 32.0  36.1  2.23     0.239
+  Tyler Rogers              43.0  41.2  1.73     0.239
+  Jhoan Duran               33.0  31.2  1.42     0.243
+
+── DEADLINE STRATEGY ──
+  Minor buyer — rotation top 5 MLB, bullpen elite with Brash, offense improving with IL returns. Stand pat or add depth only. Do NOT trade prospects for win-now pieces — system too valuable.
+
+  NEEDS:
+    → 1B/DH offensive upgrade
+    → Bullpen middle relief depth
+
+  TARGET PROFILES:
+    Position:  1B or DH
+    Profile:   Contact/power hybrid — .270+ BA, 20+ HR pace, .340+ xwOBA
+    Cost:      Low-mid prospect or waiver claim
+    Why:       1B WAR rank 28-30/30 — Naylor below average bat and glove
+
+    Position:  RP
+    Profile:   Veteran middle reliever — command-first, groundball tendency
+    Cost:      Waiver claim or minimum salary
+    Why:       Need reliable 6th/7th inning arm behind Ferrer/Bazardo/Speier
+
+  DO NOT TRADE:
+    ✗ Julio Rodriguez    — 10yr/$210M franchise player
+    ✗ Bryce Miller       — xwOBA .221 top 3% MLB, ascending
+    ✗ Emerson Hancock    — 2.74 ERA, elite rotation piece
+    ✗ Bryan Woo          — xwOBA .272, above average
+    ✗ Randy Arozarena    — best bat on team when healthy
+    ✗ Matt Brash         — 0.60 ERA, elite closer
+    ✗ Colt Emerson       — 8yr/$95M franchise cornerstone
+    ✗ Cole Young         — 2.4 WAR, emerging star
+    ✗ Logan Gilbert      — 3.29 ERA, 2.1 WAR, ascending
+
+  SELL CANDIDATES:
+    → Luis Castillo: ERA 5.00+, expensive contract, rotation 6-deep without him
+      Note: Only if ERA continues above 4.50 through July
+
+── SEASON OUTLOOK ──
+  Record now:   47-47
+  Most likely:  79—81 wins
+  Floor/Ceiling:76—83 wins
+  Playoff path: AL West title → avoid TB/NYY until ALCS
+  October:      Dangerous in short series — Miller + Woo + Hancock + Gilbert + Brash + Ferrer = can beat anyone in 5 games
+
+  Key factors:
+    ✓ Donovan + Raleigh + Crawford return from IL
+    ✓ Brash takes over closer role immediately
+    ✓ Miller gets full-time rotation spot
+    ✓ Kirby bounces back or piggyback with Miller
+    ✓ Luck correction — -2.0 luck = free wins coming
+    ✓ Favorable schedule — 24 games vs sub-.500 teams
+    ✓ Gilbert emerging as legitimate #3 starter — 3.29 ERA, 2.1 WAR
+
+  Risks:
+    ⚠ Kirby sustained decline — K rate dropped, not just a slump
+    ⚠ Muñoz curveball command doesn't improve in setup role
+    ⚠ Injury to Hancock, Woo, or Miller
+    ⚠ Offense stalls without Donovan/Raleigh returning healthy
+    ⚠ 1B hole — Naylor below average, no internal fix
+
+=================================================================
+
+
+======================================================================
+SEATTLE MARINERS - DEADLINE ACQUISITION SIMULATOR
+As of: 2026-07-10  |  Record: 47-47
+Games remaining: 68  |  Luck: -2.0
+======================================================================
+
+-- SCENARIO SUMMARY --
+  Scenario                                       RS/G  RA/G  Win% Proj W    Final Playoff
+  -----------------------------------------------------------------------------------------------
+  Baseline - no moves, no IL returns             4.05  3.84 0.524     36 83-79  Wild Card 3 (bubble)
+  IL Returns Only - no deadline moves            4.39  3.70 0.578     39 86-76  Division winner
+  IL Returns + YES Targets (Eldridge + Bleday    4.61  3.70 0.600     40 87-75  Division winner
+  IL Returns + YES + Pitching (+ Lee + Varland   4.61  3.57 0.615     40 87-75  Division winner
+  IL Returns + MAYBE (Dingler + Vargas + Contr   4.59  3.70 0.598     40 87-75  Division winner
+  Best Case - All IL + YES + Pitching            4.61  3.52 0.622     41 88-74  Division winner
+  Worst Case - No moves, Julio slow return       4.05  3.70 0.542     36 83-79  Wild Card 3 (bubble)
+  Optimistic IL - Everyone Returns Early         4.40  3.68 0.581     39 86-76  Division winner
+  Pessimistic IL - Setbacks, Late Returns        4.45  3.66 0.588     38 85-77  Division winner
+
+-- BASELINE - NO MOVES, NO IL RETURNS --
+  RS/G: 4.05  RA/G: 3.84  Win%: 0.524  Luck wins: 0
+  Projected: 83-79  (0.512 win%)
+  Playoff: Wild Card 3 (bubble)
+  vs TEX:  +0 games
+  vs HOU:  +4 games
+
+-- IL RETURNS ONLY - NO DEADLINE MOVES --
+  RS/G: 4.39  RA/G: 3.7  Win%: 0.578  Luck wins: 1
+  Projected: 86-76  (0.531 win%)
+  Playoff: Division winner
+  vs TEX:  +3 games
+  vs HOU:  +7 games
+  Factors:
+    * IL return: Julio Rodriguez          +0.180 RS/G         Franchise CF, .337 xwOBA, 14 HR - est Jul 10
+    * IL return: Brendan Donovan          +0.128 RS/G         .839 OPS when healthy - est Jul 17
+    * IL return: Will Wilson              +0.035 RS/G         Bench depth - est Jul 20
+    * IL return: Matt Brash               -0.088 RA/G         0.54 ERA closer - est Jul 20 from 15-day IL
+    * IL return: Carlos Vargas            -0.035 RA/G         Bullpen depth - est Aug 3 from 60-day IL
+    * IL return: Cooper Criswell          -0.022 RA/G         60-day IL - return date uncertain
+    * Luck correction                                         Luck -2.0 - ~1 free wins
+
+-- IL RETURNS + YES TARGETS (ELDRIDGE + BLEDAY + JEFFERS) --
+  RS/G: 4.61  RA/G: 3.7  Win%: 0.6  Luck wins: 1
+  Projected: 87-75  (0.537 win%)
+  Playoff: Division winner
+  vs TEX:  +4 games
+  vs HOU:  +8 games
+  Factors:
+    * IL return: Julio Rodriguez          +0.180 RS/G         Franchise CF, .337 xwOBA, 14 HR - est Jul 10
+    * IL return: Brendan Donovan          +0.128 RS/G         .839 OPS when healthy - est Jul 17
+    * IL return: Will Wilson              +0.035 RS/G         Bench depth - est Jul 20
+    * IL return: Matt Brash               -0.088 RA/G         0.54 ERA closer - est Jul 20 from 15-day IL
+    * IL return: Carlos Vargas            -0.035 RA/G         Bullpen depth - est Aug 3 from 60-day IL
+    * IL return: Cooper Criswell          -0.022 RA/G         60-day IL - return date uncertain
+    * Acquired: Bryce Eldridge            +0.088 RS/G         NL power bat, .405 xwOBA, upside
+    * Acquired: JJ Bleday                 +0.074 RS/G         OF depth, .399 xwOBA, 14 HR
+    * Acquired: Ryan Jeffers              +0.059 RS/G         .949 OPS, insurance/DH flexibility
+    * Luck correction                                         Luck -2.0 - ~1 free wins
+
+-- IL RETURNS + YES + PITCHING (+ LEE + VARLAND) --
+  RS/G: 4.61  RA/G: 3.57  Win%: 0.615  Luck wins: 1
+  Projected: 87-75  (0.537 win%)
+  Playoff: Division winner
+  vs TEX:  +4 games
+  vs HOU:  +8 games
+  Factors:
+    * IL return: Julio Rodriguez          +0.180 RS/G         Franchise CF, .337 xwOBA, 14 HR - est Jul 10
+    * IL return: Brendan Donovan          +0.128 RS/G         .839 OPS when healthy - est Jul 17
+    * IL return: Will Wilson              +0.035 RS/G         Bench depth - est Jul 20
+    * IL return: Matt Brash               -0.088 RA/G         0.54 ERA closer - est Jul 20 from 15-day IL
+    * IL return: Carlos Vargas            -0.035 RA/G         Bullpen depth - est Aug 3 from 60-day IL
+    * IL return: Cooper Criswell          -0.022 RA/G         60-day IL - return date uncertain
+    * Acquired: Bryce Eldridge            +0.088 RS/G         NL power bat, .405 xwOBA, upside
+    * Acquired: JJ Bleday                 +0.074 RS/G         OF depth, .399 xwOBA, 14 HR
+    * Acquired: Ryan Jeffers              +0.059 RS/G         .949 OPS, insurance/DH flexibility
+    * Acquired: Dylan Lee                 -0.066 RA/G         Elite .209 xwOBA, 1.52 ERA
+    * Acquired: Louis Varland             -0.059 RA/G         Elite .216 xwOBA, 0.94 ERA
+    * Luck correction                                         Luck -2.0 - ~1 free wins
+
+-- IL RETURNS + MAYBE (DINGLER + VARGAS + CONTRERAS) --
+  RS/G: 4.59  RA/G: 3.7  Win%: 0.598  Luck wins: 1
+  Projected: 87-75  (0.537 win%)
+  Playoff: Division winner
+  vs TEX:  +4 games
+  vs HOU:  +8 games
+  Factors:
+    * IL return: Julio Rodriguez          +0.180 RS/G         Franchise CF, .337 xwOBA, 14 HR - est Jul 10
+    * IL return: Brendan Donovan          +0.128 RS/G         .839 OPS when healthy - est Jul 17
+    * IL return: Will Wilson              +0.035 RS/G         Bench depth - est Jul 20
+    * IL return: Matt Brash               -0.088 RA/G         0.54 ERA closer - est Jul 20 from 15-day IL
+    * IL return: Carlos Vargas            -0.035 RA/G         Bullpen depth - est Aug 3 from 60-day IL
+    * IL return: Cooper Criswell          -0.022 RA/G         60-day IL - return date uncertain
+    * Acquired: Dillon Dingler            +0.081 RS/G         Tigers seller, .409 xwOBA, 19 HR
+    * Acquired: Miguel Vargas             +0.066 RS/G         Versatile, .397 xwOBA, 20 HR
+    * Acquired: Willson Contreras         +0.052 RS/G         Veteran, playoff experience
+    * Luck correction                                         Luck -2.0 - ~1 free wins
+
+-- BEST CASE - ALL IL + YES + PITCHING --
+  RS/G: 4.61  RA/G: 3.52  Win%: 0.622  Luck wins: 1
+  Projected: 88-74  (0.543 win%)
+  Playoff: Division winner
+  vs TEX:  +5 games
+  vs HOU:  +9 games
+  Factors:
+    * IL return: Julio Rodriguez          +0.180 RS/G         Franchise CF, .337 xwOBA, 14 HR - est Jul 10
+    * IL return: Brendan Donovan          +0.128 RS/G         .839 OPS when healthy - est Jul 17
+    * IL return: Will Wilson              +0.035 RS/G         Bench depth - est Jul 20
+    * IL return: Matt Brash               -0.088 RA/G         0.54 ERA closer - est Jul 20 from 15-day IL
+    * IL return: Carlos Vargas            -0.035 RA/G         Bullpen depth - est Aug 3 from 60-day IL
+    * IL return: Cooper Criswell          -0.022 RA/G         60-day IL - return date uncertain
+    * Acquired: Bryce Eldridge            +0.088 RS/G         NL power bat, .405 xwOBA, upside
+    * Acquired: JJ Bleday                 +0.074 RS/G         OF depth, .399 xwOBA, 14 HR
+    * Acquired: Ryan Jeffers              +0.059 RS/G         .949 OPS, insurance/DH flexibility
+    * Acquired: Dylan Lee                 -0.066 RA/G         Elite .209 xwOBA, 1.52 ERA
+    * Acquired: Louis Varland             -0.059 RA/G         Elite .216 xwOBA, 0.94 ERA
+    * Acquired: Raisel Iglesias           -0.052 RA/G         Veteran closer/setup, 2.30 ERA
+    * Luck correction                                         Luck -2.0 - ~1 free wins
+
+-- WORST CASE - NO MOVES, JULIO SLOW RETURN --
+  RS/G: 4.05  RA/G: 3.7  Win%: 0.542  Luck wins: 0
+  Projected: 83-79  (0.512 win%)
+  Playoff: Wild Card 3 (bubble)
+  vs TEX:  +0 games
+  vs HOU:  +4 games
+  Factors:
+    * IL return: Matt Brash               -0.088 RA/G         0.54 ERA closer - est Jul 20 from 15-day IL
+    * IL return: Carlos Vargas            -0.035 RA/G         Bullpen depth - est Aug 3 from 60-day IL
+    * IL return: Cooper Criswell          -0.022 RA/G         60-day IL - return date uncertain
+
+-- OPTIMISTIC IL - EVERYONE RETURNS EARLY --
+  RS/G: 4.4  RA/G: 3.68  Win%: 0.581  Luck wins: 1
+  Projected: 86-76  (0.531 win%)
+  Playoff: Division winner
+  vs TEX:  +3 games
+  vs HOU:  +7 games
+  Factors:
+    * IL return: Julio Rodriguez          +0.180 RS/G         Franchise CF, .337 xwOBA, 14 HR - est Jul 10
+    * IL return: Brendan Donovan          +0.133 RS/G         .839 OPS when healthy - est Jul 17
+    * IL return: Will Wilson              +0.036 RS/G         Bench depth - est Jul 20
+    * IL return: Matt Brash               -0.091 RA/G         0.54 ERA closer - est Jul 20 from 15-day IL
+    * IL return: Carlos Vargas            -0.039 RA/G         Bullpen depth - est Aug 3 from 60-day IL
+    * IL return: Cooper Criswell          -0.029 RA/G         60-day IL - return date uncertain
+    * Luck correction                                         Luck -2.0 - ~1 free wins
+
+-- PESSIMISTIC IL - SETBACKS, LATE RETURNS --
+  RS/G: 4.45  RA/G: 3.66  Win%: 0.588  Luck wins: 0
+  Projected: 85-77  (0.525 win%)
+  Playoff: Division winner
+  vs TEX:  +2 games
+  vs HOU:  +6 games
+  Factors:
+    * IL return: Julio Rodriguez          +0.164 RS/G         Franchise CF, .337 xwOBA, 14 HR - est Jul 10
+    * IL return: Brendan Donovan          +0.116 RS/G         .839 OPS when healthy - est Jul 17
+    * IL return: Will Wilson              +0.032 RS/G         Bench depth - est Jul 20
+    * IL return: Matt Brash               -0.074 RA/G         0.54 ERA closer - est Jul 20 from 15-day IL
+    * IL return: Carlos Vargas            -0.026 RA/G         Bullpen depth - est Aug 3 from 60-day IL
+    * IL return: Cooper Criswell          -0.014 RA/G         60-day IL - return date uncertain
+    * Acquired: Bryce Eldridge            +0.088 RS/G         NL power bat, .405 xwOBA, upside
+    * Acquired: Dylan Lee                 -0.066 RA/G         Elite .209 xwOBA, 1.52 ERA
+
+======================================================================
+NOTES:
+  * IL return dates are TEAM ESTIMATES - actual returns may vary
+  * HIGH confidence = 7-day IL, short stint
+  * MEDIUM confidence = 10-15 day IL
+  * LOW confidence = 60-day IL, longer recovery
+  * RS/G and RA/G impacts estimated from xwOBA differentials
+  * TEX projected ~83W, HOU ~79W based on current trajectory
+======================================================================
+
+
+=================================================================
+  COMPLETE -- 41.1s
+=================================================================
+  Record:         47-47
+  Grade:          B -- Wild card contender
+  Projected wins: 79
+  Range:          76--83 wins
+  Data as of:     2026-07-10 (refresh with --refresh)
+  Report:         C:\Users\geoff\OneDrive\Desktop\MLB PROJECT\output\mariners_report_20260710.xlsx
+=================================================================
+
+PS C:\Users\geoff\OneDrive\Desktop\MLB PROJECT> 
