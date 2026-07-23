@@ -36,18 +36,17 @@ CURRENT_ERA_RANK  = 4      # ERA rank out of 30
 # late_return  = if setback occurs
 
 IL_RETURNS = [
+    # Julio Rodriguez removed 2026-07-23: he's back and his real production
+    # is already baked into CURRENT_RS_G (pulled live from the season-to-date
+    # batting overview). Leaving his entry in would double-count him -- once
+    # in the real team stats, once again as a projected future boost. This
+    # is a general gotcha with IL_RETURNS: _calc_il_impact() only checks the
+    # return date against season-end, not against today, so an entry with a
+    # past return_date keeps contributing at close to full weight instead of
+    # zeroing out. Remove (don't just leave) an entry as soon as a player is
+    # confirmed back, rather than trusting the date math to handle it.
     {
-        "name":         "Julio Rodriguez",
-        "pos":          "CF",
-        "return_date":  date(2026, 7, 10),   # team estimate
-        "early_return": date(2026, 7, 10),   # today
-        "late_return":  date(2026, 7, 17),   # if setback
-        "rs_impact":    0.18,
-        "ra_impact":    0.00,
-        "confidence":   "HIGH",              # 7-day IL, short
-        "note":         "Franchise CF, .337 xwOBA, 14 HR - est Jul 10",
-    },
-    {
+
         "name":         "Rob Refsnyder",
         "pos":          "DH",
         "return_date":  date(2026, 7, 10),

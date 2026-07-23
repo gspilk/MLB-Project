@@ -16,6 +16,9 @@ Usage:
 import pandas as pd
 from datetime import date
 
+from name_matching import key_from_first_last, key_from_last_first
+from mariners_stats import get_bullpen
+
 # ── thresholds ────────────────────────────────────────────────────────────────
 # batting
 XWOBA_ELITE       = 0.370
@@ -215,17 +218,23 @@ def analyze_pitching(data: dict) -> dict:
     if sea_pit is not None and not sea_pit.empty:
         xwoba_col = "xwOBA_against"
         if xwoba_col in sea_pit.columns:
-            # rotation starters
-            seattle_bat = _safe_get(data, "seattle", "pitching")
-            if seattle_bat is not None and not seattle_bat.empty:
-                starters = seattle_bat[
-                    pd.to_numeric(seattle_bat.get("GS", 0),
-                                  errors="coerce") >= 3
-                ]["Name"].tolist() if "Name" in seattle_bat.columns else []
+            # sea_pit["Name"] comes from Statcast ("Last, First"); the bbref
+            # pitching table below uses "First Last" -- build a matching
+            # key on both sides instead of comparing raw names directly
+            # (the two formats never matched via .isin(), which silently
+            # dropped the rotation-specific xwOBA overlay).
+            sea_pit = sea_pit.copy()
+            sea_pit["_key"] = sea_pit["Name"].apply(key_from_last_first)
 
-                rot_pit = sea_pit[
-                    sea_pit["Name"].isin(starters)
-                ] if starters else sea_pit
+            # rotation starters
+            seattle_pit = _safe_get(data, "seattle", "pitching")
+            if seattle_pit is not None and not seattle_pit.empty and "Name" in seattle_pit.columns:
+                starters_df = seattle_pit[
+                    pd.to_numeric(seattle_pit.get("GS", 0), errors="coerce") >= 3
+                ]
+                starter_keys = starters_df["Name"].apply(key_from_first_last).tolist()
+
+                rot_pit = sea_pit[sea_pit["_key"].isin(starter_keys)] if starter_keys else sea_pit
 
                 if not rot_pit.empty:
                     avg_rot_xwoba = rot_pit[xwoba_col].mean()
@@ -234,11 +243,15 @@ def analyze_pitching(data: dict) -> dict:
                     elif avg_rot_xwoba <= XWOBA_P_ABOVE:
                         result["rotation_grade"] = "Above Average"
 
-            # bullpen
-            bp_keywords = ["Mu", "Brash", "Ferrer", "Bazardo", "Criswell"]
-            bp = sea_pit[sea_pit["Name"].str.contains(
-                "|".join(bp_keywords), case=False, na=False
-            )]
+                # bullpen -- driven by mariners_stats.get_bullpen() (GS == 0)
+                # instead of a hardcoded list of pitcher-name fragments that
+                # had to be hand-updated after every trade/call-up.
+                bullpen_df = get_bullpen(seattle_pit)
+                bullpen_keys = bullpen_df["Name"].apply(key_from_first_last).tolist() if not bullpen_df.empty else []
+                bp = sea_pit[sea_pit["_key"].isin(bullpen_keys)] if bullpen_keys else pd.DataFrame()
+            else:
+                bp = pd.DataFrame()
+
             if not bp.empty:
                 avg_bp_xwoba = bp[xwoba_col].mean()
                 if avg_bp_xwoba <= XWOBA_P_ELITE:

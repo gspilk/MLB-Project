@@ -31,7 +31,13 @@ RENAME = {
     "swing_percent":         "Swing%",
 }
 
-MARINERS_BATTERS = [
+# FALLBACK ONLY -- these are used solely if the live 40-man roster scrape
+# (mariners_stats.py -> data["seattle"]["roster"]) is unavailable, e.g. the
+# very first run before any cache exists, or bbref is unreachable. Normal
+# runs use the live roster passed in via `roster_last_names` below instead,
+# so this list is NOT kept up to date with trades/call-ups on purpose --
+# don't rely on it being current. See roster.py.
+_FALLBACK_MARINERS_BATTERS = [
     "Rodríguez, Julio", "Arozarena, Randy", "Raley, Luke",
     "Young, Cole", "Crawford, J.P.", "Raleigh, Cal",
     "Naylor, Josh", "Canzone, Dominic", "Donovan, Brendan",
@@ -40,7 +46,7 @@ MARINERS_BATTERS = [
     "Wisdom, Patrick", "Joe, Connor", "Bliss, Ryan",
 ]
 
-MARINERS_PITCHERS = [
+_FALLBACK_MARINERS_PITCHERS = [
     "Kirby, George", "Woo, Bryan", "Hancock, Emerson",
     "Gilbert, Logan", "Castillo, Luis", "Miller, Bryce",
     "Muñoz, Andrés", "Brash, Matt", "Ferrer, José A.",
@@ -90,24 +96,41 @@ def get_statcast(batter_file=BATTER_FILE,
     return bat, pit
 
 
-def get_mariners_batters(df):
-    if df.empty or "Name" not in df.columns:
-        return pd.DataFrame()
-    sea = df[df["Name"].isin(MARINERS_BATTERS)]
+def _filter_by_roster(df, roster_keys, fallback_names):
+    """
+    Filters a Statcast dataframe (Name = "Last, First") down to players on
+    the current roster. Prefers the live `roster_keys` set (precise
+    'lastname_firstinitial' keys from roster.get_roster_keys -- NOT
+    last-name-only, since the roster has real last-name collisions with
+    other teams, e.g. more than one "Wilson" in MLB); falls back to the
+    bundled hardcoded list -- with a warning -- if the live roster wasn't
+    available.
+    """
+    from name_matching import key_from_last_first
+
+    if roster_keys:
+        sea = df[df["Name"].apply(key_from_last_first).isin(roster_keys)]
+        return sea.reset_index(drop=True)
+
+    print("  [warn] no live roster available -- falling back to bundled "
+          "Mariners name list, which may be stale (see statcast_scraper.py)")
+    sea = df[df["Name"].isin(fallback_names)]
     if sea.empty:
-        last_names = [n.split(",")[0] for n in MARINERS_BATTERS]
+        last_names = [n.split(",")[0] for n in fallback_names]
         sea = df[df["Name"].str.split(",").str[0].isin(last_names)]
     return sea.reset_index(drop=True)
 
 
-def get_mariners_pitchers(df):
+def get_mariners_batters(df, roster_keys=None):
     if df.empty or "Name" not in df.columns:
         return pd.DataFrame()
-    sea = df[df["Name"].isin(MARINERS_PITCHERS)]
-    if sea.empty:
-        last_names = [n.split(",")[0] for n in MARINERS_PITCHERS]
-        sea = df[df["Name"].str.split(",").str[0].isin(last_names)]
-    return sea.reset_index(drop=True)
+    return _filter_by_roster(df, roster_keys, _FALLBACK_MARINERS_BATTERS)
+
+
+def get_mariners_pitchers(df, roster_keys=None):
+    if df.empty or "Name" not in df.columns:
+        return pd.DataFrame()
+    return _filter_by_roster(df, roster_keys, _FALLBACK_MARINERS_PITCHERS)
 
 
 def get_luck_analysis(df, is_pitcher=False):

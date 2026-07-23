@@ -79,11 +79,18 @@ AAA_CANDIDATES = {
 # if bbref data is stale, clear cache and re-run
 HARDCODED_GRADES = {}
 
+# flavor text ONLY -- consulted by _get_il_note() after _is_il() has
+# already confirmed a player is on the IL via bbref's real annotation.
+# Keep this in sync with actual current IL status (e.g. via ESPN), but a
+# stale/missing entry here is low-risk now -- it just falls back to a
+# generic "on IL" note instead of misidentifying someone as injured (that
+# used to be possible; see _is_il()'s docstring for the bug this replaced).
+# Last synced 2026-07-23 vs ESPN IL report.
 IL_PLAYERS = {
-    "Raleigh":    "10-day IL — power expected to return",
-    "Crawford":   "10-day IL — elite walk rate, critical return",
-    "Donovan":    "10-day IL — .839 OPS when healthy",
-    "Wilson":     "10-day IL — bench depth",
+    "Refsnyder":  "10-day IL — DH depth, est. return Jul 24",
+    "Donovan":    "10-day IL — .839 OPS when healthy, est. return Jul 28",
+    "Wilson":     "60-day IL — bench depth, est. return Jul 28",
+    "Vargas":     "60-day IL — bullpen depth, est. return Aug 3",
 }
 
 # roster notes are generated from data — no hardcoded text
@@ -147,8 +154,14 @@ def _is_dfa(name: str) -> bool:
     return any(k.lower() in name.lower() for k in DFA_CANDIDATES)
 
 def _is_il(name: str) -> bool:
-    return "IL" in name or any(k.lower() in name.lower()
-                               for k in IL_PLAYERS)
+    # Trust bbref's own live annotation on the name (e.g. "Rob Refsnyder
+    # (10-day IL)") -- this reflects real, current status. The hardcoded
+    # IL_PLAYERS dict below is used only to add flavor text once a player
+    # is already confirmed IL via this check, NOT as an independent
+    # trigger -- it previously matched on bare last-name fragments (e.g.
+    # "Crawford") regardless of real status, which incorrectly flagged
+    # J.P. Crawford as "on IL" while he was merely day-to-day.
+    return "IL" in name
 
 def _get_note(name: str) -> str:
     # notes are generated from data now
@@ -168,16 +181,14 @@ def _get_dfa_reason(name: str) -> str:
     return ""
 
 def _get_il_note(name: str) -> str:
-    # check IL in name first
-    if "IL" in name:
-        for k, v in IL_PLAYERS.items():
-            if k.lower() in name.lower():
-                return v
-        return "on IL"
+    # only consult the flavor-text dict once bbref's own annotation has
+    # already confirmed IL status -- don't match on name fragments alone
+    if "IL" not in name:
+        return ""
     for k, v in IL_PLAYERS.items():
         if k.lower() in name.lower():
             return v
-    return ""
+    return "on IL"
 
 
 def _grade_ops(ops: float) -> str:

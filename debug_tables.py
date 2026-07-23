@@ -1,29 +1,15 @@
 import pandas as pd
-import unicodedata
-import sys
-sys.path.insert(0, r"c:/Users/geoff/OneDrive/Desktop/MLB PROJECT")
 
 from data_builder import build_all
+from name_matching import key_from_first_last, key_from_last_first
+from roster import get_roster_last_names
 
 data    = build_all(2026)
 all_bat = data.get("batting",{}).get("all_players")
 sc_bat  = data.get("statcast",{}).get("batters")
 
-def norm(s):
-    s = str(s).lower().strip()
-    return "".join(c for c in unicodedata.normalize("NFD",s)
-                   if unicodedata.category(c)!="Mn")
-
-def key_fl(name):
-    p = str(name).split()
-    return norm(p[-1])+"_"+norm(p[0])[0] if len(p)>=2 else norm(name)
-
-def key_lf(name):
-    p = str(name).split(",")
-    return norm(p[0].strip())+"_"+norm(p[1].strip())[0] if len(p)>=2 else norm(name)
-
-all_bat["_key"] = all_bat["Name"].apply(key_fl)
-sc_bat["_key"]  = sc_bat["Name"].apply(key_lf)
+all_bat["_key"] = all_bat["Name"].apply(key_from_first_last)
+sc_bat["_key"]  = sc_bat["Name"].apply(key_from_last_first)
 
 b_cols = ["_key","Name","Pos"] + \
          [c for c in ["PA","OPS","HR","BA","league"] if c in all_bat.columns]
@@ -36,13 +22,10 @@ merged = pd.merge(all_bat[b_cols], sc_bat[s_cols], on="_key", how="inner")
 for c in ["xwOBA","Barrel%","PA"]:
     merged[c] = pd.to_numeric(merged[c], errors="coerce")
 
-MARINERS = {
-    "rodriguez","arozarena","raley","young","crawford","raleigh",
-    "naylor","canzone","donovan","emerson","garver","kirby","woo",
-    "hancock","gilbert","castillo","miller","munoz","brash","ferrer",
-    "bazardo","criswell","speier","pereda","wisdom","rivas","refsnyder",
-    "robles","wilson","bliss","joe","mastrobuoni"
-}
+# live roster, not a hardcoded list -- see roster.py
+MARINERS = get_roster_last_names(data)
+if not MARINERS:
+    print("[warn] live roster unavailable -- targets may include current Mariners")
 
 def is_mariner(k):
     return k.split("_")[0] in MARINERS

@@ -27,6 +27,14 @@ OUTPUT_DIR  = os.path.join(os.path.dirname(__file__), "output")
 OUTPUT_FILE = os.path.join(OUTPUT_DIR,
     f"mariners_report_{date.today().strftime('%Y%m%d')}.xlsx")
 
+# Append-only snapshot table, one row per report run. This is what powers
+# trend charts (win projection over time, grade over time, etc.) -- the
+# dated Excel files above are point-in-time snapshots that don't stitch
+# together into a trend on their own; this does. Lives under data/, not
+# output/, since it's an accumulating data asset rather than a disposable
+# generated report.
+HISTORY_PATH = os.path.join(os.path.dirname(__file__), "data", "history.parquet")
+
 # ── colors ────────────────────────────────────────────────────────────────────
 NAVY     = "1B2A4A"
 TEAL     = "005C5C"
@@ -706,6 +714,55 @@ def _sheet_simulation(wb, scenarios: dict):
 
 
 # ── main generate function ────────────────────────────────────────────────────
+def _append_history_row(d: dict, ou: dict) -> None:
+    """
+    Appends one snapshot row to data/history.parquet each time a report is
+    generated. Re-running on the same date replaces that day's row instead
+    of duplicating it, so you can re-run mid-day without corrupting trends.
+    """
+    row = {
+        "date":               date.today().isoformat(),
+        "record":             d.get("record"),
+        "win_pct":            d.get("win_pct"),
+        "grade":              d.get("grade"),
+        "verdict":            d.get("verdict"),
+        "projected_wins":     d.get("projected_wins"),
+        "floor":              d.get("floor"),
+        "ceiling":            d.get("ceiling"),
+        "luck":               d.get("luck"),
+        "pythag":             d.get("pythag"),
+        "offense_grade":      d.get("offense_grade"),
+        "rotation_grade":     d.get("rotation_grade"),
+        "bullpen_grade":      d.get("bullpen_grade"),
+        "team_era":           d.get("team_era"),
+        "era_rank":           d.get("era_rank"),
+        "div_rank":           d.get("div_rank"),
+        "mlb_rank":           d.get("mlb_rank"),
+        "most_likely_outlook": ou.get("most_likely"),
+    }
+
+    os.makedirs(os.path.dirname(HISTORY_PATH), exist_ok=True)
+    new_row = pd.DataFrame([row])
+
+    if os.path.exists(HISTORY_PATH):
+        try:
+            history = pd.read_parquet(HISTORY_PATH)
+            # drop any existing row for today so a same-day re-run updates
+            # in place instead of appending a duplicate snapshot
+            history = history[history["date"] != row["date"]]
+            history = pd.concat([history, new_row], ignore_index=True)
+        except Exception as e:
+            print(f"  [warn] could not read existing history.parquet ({e}) "
+                  f"-- starting a fresh history file")
+            history = new_row
+    else:
+        history = new_row
+
+    history = history.sort_values("date").reset_index(drop=True)
+    history.to_parquet(HISTORY_PATH, index=False)
+    print(f"[report] history updated: {HISTORY_PATH} ({len(history)} snapshots)")
+
+
 def generate_report(data: dict, analysis: dict,
                     grades: dict, recs: dict,
                     scenarios: dict = None,
@@ -740,6 +797,9 @@ def generate_report(data: dict, analysis: dict,
 
     wb.save(path)
     print(f"[report] Saved: {path}")
+
+    _append_history_row(d, ou)
+
     return path
 
 

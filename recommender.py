@@ -380,16 +380,8 @@ CONTENDERS = {
     "MIN","SDP","SFG","HOU","CHC","STL"
 }
 
-MARINERS_ROSTER = {
-    "rodriguez","arozarena","raley","young",
-    "crawford","raleigh","naylor","canzone",
-    "donovan","emerson","garver","pereda",
-    "kirby","woo","hancock","gilbert","castillo",
-    "miller","munoz","brash","ferrer","bazardo",
-    "criswell","speier","hoppe","wilcox","legumina",
-    "robles","refsnyder","rivas","wilson","joe",
-    "mastrobuoni","bliss","pereda","wisdom",
-}
+from name_matching import key_from_first_last, key_from_last_first
+from roster import get_roster_last_names
 
 def _find_targets(data: dict) -> dict:
     """
@@ -402,20 +394,16 @@ def _find_targets(data: dict) -> dict:
     sc_bat  = _safe(data, "statcast", "batters")
     sc_pit  = _safe(data, "statcast", "pitchers")
 
-    import unicodedata
-    def _norm(s):
-        s = str(s).lower().strip()
-        return "".join(c for c in unicodedata.normalize("NFD", s)
-                       if unicodedata.category(c) != "Mn")
+    # live roster, not a hardcoded list -- see roster.py. Updates
+    # automatically after trades/call-ups instead of needing manual edits.
+    MARINERS_ROSTER = get_roster_last_names(data)
+    if not MARINERS_ROSTER:
+        print("  [warn] live roster unavailable -- trade targets may "
+              "include current Mariners players")
 
     def _key_b(name, fmt):
         """Join key: last+first_initial, accent normalized."""
-        if fmt == "fl":  # "First Last" bbref format
-            p = str(name).split()
-            return _norm(p[-1])+"_"+_norm(p[0])[0] if len(p)>=2 else _norm(name)
-        else:            # "Last, First" savant format
-            p = str(name).split(",")
-            return _norm(p[0].strip())+"_"+_norm(p[1].strip())[0] if len(p)>=2 else _norm(name)
+        return key_from_first_last(name) if fmt == "fl" else key_from_last_first(name)
 
     batter_targets  = []
     pitcher_targets = []
@@ -448,12 +436,19 @@ def _find_targets(data: dict) -> dict:
             def _is_mariner_key(key):
                 return key.split("_")[0] in MARINERS_ROSTER
 
-            # exclude known untouchable contender players
-            UNTOUCHABLE = {
-                "judge_a","ohtani_s","soto_j","harper_b",
-                "guerrero_v","acuna_r","trout_m","betts_m",
-                "alvarez_y","freeman_f"
-            }
+            # exclude known untouchable contender players -- built from
+            # real names via key_from_first_last() rather than hardcoded
+            # key strings. Hardcoded keys silently stopped matching the
+            # last time the key format changed (initial -> full first
+            # name), which let Judge/Ohtani/Soto/Harper etc. show up as
+            # "trade targets." Generating from names avoids that class of
+            # bug recurring if the key format ever changes again.
+            UNTOUCHABLE_NAMES = [
+                "Aaron Judge", "Shohei Ohtani", "Juan Soto", "Bryce Harper",
+                "Vladimir Guerrero Jr.", "Ronald Acuna Jr.", "Mike Trout",
+                "Mookie Betts", "Yordan Alvarez", "Freddie Freeman",
+            ]
+            UNTOUCHABLE = {key_from_first_last(n) for n in UNTOUCHABLE_NAMES}
 
             mask = (
                 (merged["xwOBA"]   >= 0.330) &

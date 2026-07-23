@@ -1,0 +1,20 @@
+Python / program files — do now
+
+ Fix hardcoded roster — pull MARINERS_ROSTER (recommender.py), bullpen keywords (team_analyzer.py), and roster set (debug_tables.py) from sea_roster_2026.parquet instead
+ Consolidate duplicated name-matching code (norm, key_fl/key_lf) into one shared name_matching.py
+ Add history.parquet append logic — one row per run (date, record, RS/G, RA/G, projected wins, grade, luck) written from output_report.py/data_builder.py
+
+Python / program files — later (after deadline, once things settle)
+
+ Swap print() statements for logging, gradually
+ Add real unit tests for name-matching keys, Pythagorean win calc, and grading formula
+ Add requirements.txt
+ Fix hardcoded Windows path in debug_tables.py
+ Parameterize team/season instead of hardcoding "Seattle"/2026 everywhere
+ Build Monte Carlo playoff-odds simulation (replace static RS/G-based scenarios)
+ Add trade-fit scoring (match target players to actual team weaknesses)
+ Add backtesting — compare past grades/projections to actual outcomes
+
+Repo, not code — do whenever
+
+ .gitignore for __pycache__/, data/cache/, output/*.xlsx; untrack what's already committed

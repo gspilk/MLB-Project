@@ -15,6 +15,7 @@ from battingpitching_scraper  import get_batting, get_pitching
 from mlb_team_stats            import get_mlb_overview
 from statcast_scraper          import (get_statcast, get_mariners_batters,
                                        get_mariners_pitchers, get_luck_analysis)
+from roster                    import get_roster_keys
 
 SEASON = 2026
 
@@ -71,11 +72,11 @@ def build_overview(season=SEASON, force_refresh=False) -> dict:
     return get_mlb_overview(season, force_refresh=force_refresh)
 
 
-def build_statcast() -> dict:
+def build_statcast(roster_keys=None) -> dict:
     print("[build] statcast ...")
     batters, pitchers = get_statcast()
-    sea_bat = get_mariners_batters(batters)
-    sea_pit = get_mariners_pitchers(pitchers)
+    sea_bat = get_mariners_batters(batters, roster_keys)
+    sea_pit = get_mariners_pitchers(pitchers, roster_keys)
     return {
         "batters":     batters,
         "pitchers":    pitchers,
@@ -99,8 +100,19 @@ def build_all(season=SEASON, force_refresh=False) -> dict:
         "batting":   build_batting(season,   force_refresh),
         "pitching":  build_pitching(season,  force_refresh),
         "overview":  build_overview(season,  force_refresh),
-        "statcast":  build_statcast(),
     }
+
+    # roster comes from the live 40-man scrape above -- used to identify
+    # which Statcast rows belong to the Mariners without a hardcoded name
+    # list. Uses precise last+first-initial keys (not last-name-only) since
+    # the roster has real last-name collisions with other teams' players
+    # (e.g. more than one "Wilson" in MLB). If the roster table failed to
+    # scrape, this comes back empty and get_mariners_batters/pitchers fall
+    # back to their bundled list with a warning (see statcast_scraper.py).
+    roster_keys = get_roster_keys(data)
+    print(f"[build] live roster: {len(roster_keys)} players")
+
+    data["statcast"] = build_statcast(roster_keys)
 
     elapsed = round(time.time() - start, 1)
     print(f"\n{'='*50}")
