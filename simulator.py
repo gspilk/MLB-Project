@@ -114,15 +114,27 @@ IL_RETURNS = [
     },
 ]
 
-# -- deadline acquisition profiles --------------------------------------------
+# -- deadline acquisition profiles ---------------------------------------------
+# HAND-MAINTAINED SNAPSHOT, same maintenance model as IL_RETURNS above and
+# NOT_AVAILABLE_NAMES/NOT_AVAILABLE_PITCHERS in recommender.py -- these
+# entries need periodic reconciliation against that file, since this dict
+# is completely separate from recommender.py's live target search and can
+# silently drift out of sync with it. That already happened once: Bryce
+# Eldridge and Willson Contreras were both still listed here as viable
+# acquisitions after recommender.py's NOT_AVAILABLE_NAMES had already
+# ruled them out (Eldridge is the Giants' franchise 1B they're building
+# around; Contreras has no-trade protection) -- the scenarios below were
+# quietly running win projections around trading for players who were
+# never realistically available. Swapped in players actually confirmed
+# available via recommender.py + real reporting as of 2026-07-31.
 ACQUISITION_PROFILES = {
-    "Bryce Eldridge": {
+    "Dominic Smith": {
         "pos":       "1B/DH",
-        "xwoba":     0.405,
-        "rs_impact": 0.12,   # replaces below average 1B production
+        "xwoba":     0.357,
+        "rs_impact": 0.10,   # replaces below average 1B production
         "ra_impact": 0.00,
-        "cost":      "Low prospect",
-        "note":      "NL power bat, .405 xwOBA, upside",
+        "cost":      "Waiver claim / cash",
+        "note":      "Cheap ATL DH, squeezed by Acuna/Murphy returns",
         "available": True,
     },
     "JJ Bleday": {
@@ -161,13 +173,13 @@ ACQUISITION_PROFILES = {
         "note":      "Versatile, .397 xwOBA, 20 HR",
         "available": True,
     },
-    "Willson Contreras": {
-        "pos":       "C/DH",
-        "xwoba":     0.395,
-        "rs_impact": 0.07,
+    "Carlos Cortes": {
+        "pos":       "OF/DH",
+        "xwoba":     0.384,
+        "rs_impact": 0.09,
         "ra_impact": 0.00,
         "cost":      "Low prospect",
-        "note":      "Veteran, playoff experience",
+        "note":      "A's breakout OF, minor-league find, no long-term commitment",
         "available": True,
     },
     "Dylan Lee": {
@@ -424,7 +436,7 @@ def run_simulation(custom_acquisitions: list = None) -> dict:
     # scenario 2: IL returns + your YES acquisitions
     scenarios["yes_targets"] = _build_scenario(
         "IL Returns + YES Targets (Eldridge + Bleday + Jeffers)",
-        acquisitions=["Bryce Eldridge", "JJ Bleday", "Ryan Jeffers"],
+        acquisitions=["Dominic Smith", "JJ Bleday", "Ryan Jeffers"],
         il_returns=None,
         include_luck=True,
     )
@@ -432,7 +444,7 @@ def run_simulation(custom_acquisitions: list = None) -> dict:
     # scenario 3: IL returns + YES + pitching
     scenarios["yes_plus_pitching"] = _build_scenario(
         "IL Returns + YES + Pitching (+ Lee + Varland)",
-        acquisitions=["Bryce Eldridge", "JJ Bleday", "Ryan Jeffers",
+        acquisitions=["Dominic Smith", "JJ Bleday", "Ryan Jeffers",
                       "Dylan Lee", "Louis Varland"],
         il_returns=None,
         include_luck=True,
@@ -441,7 +453,7 @@ def run_simulation(custom_acquisitions: list = None) -> dict:
     # scenario 4: IL returns + MAYBE targets
     scenarios["maybe_targets"] = _build_scenario(
         "IL Returns + MAYBE (Dingler + Vargas + Contreras)",
-        acquisitions=["Dillon Dingler", "Miguel Vargas", "Willson Contreras"],
+        acquisitions=["Dillon Dingler", "Miguel Vargas", "Carlos Cortes"],
         il_returns=None,
         include_luck=True,
     )
@@ -449,7 +461,7 @@ def run_simulation(custom_acquisitions: list = None) -> dict:
     # scenario 5: best case - all IL + all YES + pitching
     scenarios["best_case"] = _build_scenario(
         "Best Case - All IL + YES + Pitching",
-        acquisitions=["Bryce Eldridge", "JJ Bleday", "Ryan Jeffers",
+        acquisitions=["Dominic Smith", "JJ Bleday", "Ryan Jeffers",
                       "Dylan Lee", "Louis Varland", "Raisel Iglesias"],
         il_returns=None,
         include_luck=True,
@@ -475,7 +487,7 @@ def run_simulation(custom_acquisitions: list = None) -> dict:
     # scenario 8: pessimistic IL - setbacks happen
     scenarios["il_pessimistic"] = _build_scenario(
         "Pessimistic IL - Setbacks, Late Returns",
-        acquisitions=["Bryce Eldridge", "Dylan Lee"],
+        acquisitions=["Dominic Smith", "Dylan Lee"],
         il_returns=None,
         include_luck=False,
         use_early_returns=False,
@@ -593,5 +605,5 @@ if __name__ == "__main__":
 
     # example custom scenario
     print("\n-- CUSTOM SCENARIO: Just Eldridge + Lee --")
-    custom = run_simulation(["Bryce Eldridge", "Dylan Lee"])
+    custom = run_simulation(["Dominic Smith", "Dylan Lee"])
     print_simulation({"custom": custom["custom"]})

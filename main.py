@@ -13,6 +13,7 @@ import sys
 import time
 import argparse
 from datetime import date
+from data_builder import SEASON
 
 
 def parse_args():
@@ -37,7 +38,7 @@ def main():
     # step 1 -- build data
     print("STEP 1/6 -- Building data...")
     from data_builder import build_all
-    data = build_all(2026, force_refresh=args.refresh)
+    data = build_all(SEASON, force_refresh=args.refresh)
 
     # step 2 -- analyze team
     print("\nSTEP 2/6 -- Analyzing team...")
@@ -62,7 +63,15 @@ def main():
     # update simulator with live data
     try:
         standings = analysis.get("standings", {})
-        record    = standings.get("record", "47-47") or "47-47"
+        record    = standings.get("record")
+        if not record:
+            # standings scrape failed -- use an obviously-fake placeholder
+            # rather than a plausible-looking hardcoded record (e.g. the
+            # old "47-47" default), which could silently pass for real
+            # data if someone doesn't notice the [warn] below.
+            print("  [warn] no live record available -- simulator will "
+                  "use placeholder 0-0, results are not meaningful")
+            record = "0-0"
         w, l      = map(int, record.split("-"))
         sim_mod.CURRENT_W       = w
         sim_mod.CURRENT_L       = l

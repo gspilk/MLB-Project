@@ -25,7 +25,12 @@ INTERNAL_FIXES = {
 DO_NOT_TRADE = [
     "Julio Rodriguez    — 10yr/$210M franchise player",
     "Bryce Miller       — xwOBA .221 top 3% MLB, ascending",
-    "Emerson Hancock    — 2.74 ERA, elite rotation piece",
+    # Emerson Hancock removed 2026-07-28 -- per current reports he's not
+    # untouchable anymore. (Also worth noting: this list's stat text is
+    # hand-typed and can go stale like this one had -- "2.74 ERA" no
+    # longer matched his actual live ERA even before this removal. If you
+    # keep entries here, it's worth periodically checking the number
+    # against the real report output, not just the player's status.)
     "Bryan Woo          — xwOBA .272, above average",
     "Randy Arozarena    — best bat on team when healthy",
     "Matt Brash         — 0.60 ERA, elite closer",
@@ -38,18 +43,79 @@ DO_NOT_TRADE = [
 FRANCHISE_KEYS = ["Emerson, Colt", "Colt", "Rodríguez", "Julio",
                   "Raleigh", "Young, Cole", "Cole Young"]
 
-# seller teams = more likely available at deadline
-SELLER_TEAMS = {
-    "angels","athletics","rockies","white sox","nationals",
-    "marlins","tigers","royals","pirates","reds","orioles",
-    "blue jays","twins"
+# team-name-to-abbreviation map -- standings data uses full names
+# ("Houston Astros"), but the leaderboard scrapers' Team column (when
+# populated) uses 3-letter codes ("HOU"). Needed so live seller detection
+# can match against whichever format shows up.
+TEAM_ABBR = {
+    "arizona diamondbacks": "ari", "atlanta braves": "atl",
+    "baltimore orioles": "bal", "boston red sox": "bos",
+    "chicago cubs": "chc", "chicago white sox": "chw",
+    "cincinnati reds": "cin", "cleveland guardians": "cle",
+    "colorado rockies": "col", "detroit tigers": "det",
+    "houston astros": "hou", "kansas city royals": "kcr",
+    "los angeles angels": "laa", "los angeles dodgers": "lad",
+    "miami marlins": "mia", "milwaukee brewers": "mil",
+    "minnesota twins": "min", "new york mets": "nym",
+    "new york yankees": "nyy", "athletics": "ath",
+    "philadelphia phillies": "phi", "pittsburgh pirates": "pit",
+    "san diego padres": "sdp", "san francisco giants": "sfg",
+    "seattle mariners": "sea", "st. louis cardinals": "stl",
+    "tampa bay rays": "tbr", "texas rangers": "tex",
+    "toronto blue jays": "tor", "washington nationals": "was",
 }
 
-def _availability(team_name):
+# Front-office intent doesn't always match record -- a slumping big-market
+# contender (e.g. Houston mid-season) isn't a real seller even if sub-.500,
+# and a mediocre-record team can still be an obvious seller. Update these
+# by hand as situations become clear; this is the same maintenance model
+# as NOT_AVAILABLE_NAMES, just for teams instead of players.
+SELLER_OVERRIDE_EXCLUDE = {"houston astros"}
+SELLER_OVERRIDE_INCLUDE = set()
+
+
+def _compute_seller_teams(data: dict) -> set:
+    """
+    Determines likely-seller teams from LIVE standings instead of a
+    hardcoded, season-to-season guess -- replaces the old static
+    SELLER_TEAMS set. Refreshes automatically: standings_scraper.py's own
+    24-hour cache TTL means every main.py run on a new day re-pulls
+    current records, so this needs no separate "daily update" mechanism.
+
+    Flags the bottom third of MLB by win% as likely sellers, then applies
+    the manual override lists above for cases the record alone gets
+    wrong (see SELLER_OVERRIDE_EXCLUDE/INCLUDE docstring above).
+
+    Returns a set of lowercased full team names AND their abbreviations,
+    so _availability() can match against either format.
+    """
+    all_teams = _safe(data, "standings", "all_teams")
+    if all_teams is None or all_teams.empty:
+        print("  [warn] no live standings -- seller detection unavailable, "
+              "availability will show CHECK AVAILABILITY for everyone")
+        return set()
+
+    df = all_teams.copy()
+    df["W-L%"] = pd.to_numeric(df["W-L%"], errors="coerce")
+    df = df.dropna(subset=["W-L%"]).sort_values("W-L%")
+
+    n_sellers = max(1, len(df) // 3)  # bottom third of MLB
+    sellers = {str(t).lower() for t in df.head(n_sellers)["Tm"]}
+
+    sellers -= {t.lower() for t in SELLER_OVERRIDE_EXCLUDE}
+    sellers |= {t.lower() for t in SELLER_OVERRIDE_INCLUDE}
+
+    # add matching abbreviations so a "HOU"-style Team value also matches
+    abbrs = {TEAM_ABBR[t] for t in sellers if t in TEAM_ABBR}
+    return sellers | abbrs
+
+
+def _availability(team_name, seller_teams=None):
     tn = str(team_name).lower()
     if "mariners" in tn or "seattle" in tn:
         return "ON ROSTER"
-    if any(s in tn for s in SELLER_TEAMS):
+    seller_teams = seller_teams if seller_teams is not None else set()
+    if any(s == tn or s in tn for s in seller_teams):
         return "LIKELY AVAILABLE"
     return "CHECK AVAILABILITY"
 
@@ -383,16 +449,74 @@ CONTENDERS = {
 from name_matching import key_from_first_last, key_from_last_first
 from roster import get_roster_last_names
 
-def _find_targets(data: dict) -> dict:
+def _weak_positions(stats: list) -> set:
+    """
+    Pulls the set of position codes the team has a REAL external need at,
+    from _stats_to_improve()'s "WAR by Position" findings -- but only
+    where internal=False. A position flagged weak with internal=True
+    means the diagnosis itself says an IL return already fixes it (e.g.
+    SS/3B/C here are tagged as fixed once Crawford/Donovan/Raleigh are
+    back) -- that's not a real trade need, and including it would barely
+    filter anything since the team is flagged weak at most positions
+    simultaneously purely due to injuries, not talent gaps.
+
+    Maps bbref position labels to the single-character position codes used
+    in the batting leaders' "Pos" column (e.g. "2D/H"), so results can be
+    matched against those codes.
+    """
+    POS_CODE = {
+        "C": "2", "1B": "3", "2B": "4", "3B": "5", "SS": "6",
+        "LF": "7", "CF": "8", "RF": "9", "DH": "D",
+    }
+    weak = set()
+    for s in stats:
+        if s.get("category") != "WAR by Position":
+            continue
+        if s.get("internal"):
+            continue  # already covered by an IL return -- not a trade need
+        label = s["stat"].replace(" WAR", "").strip()  # e.g. "1B WAR" -> "1B"
+        if label in POS_CODE:
+            weak.add(POS_CODE[label])
+    return weak
+
+
+def _pos_matches_need(pos_str: str, weak_codes: set) -> bool:
+    """True if any of the team's weak-position codes appear in a player's
+    bbref Pos string (e.g. weak {'3','D'} matches Pos "2D/H")."""
+    if not weak_codes:
+        return True  # no specific position weakness flagged -- don't over-filter
+    pos_str = str(pos_str)
+    return any(code in pos_str for code in weak_codes)
+
+
+def _find_targets(data: dict, stats: list = None) -> dict:
     """
     Finds realistic MLB trade targets for SEA needs.
     Batters:  on sub-.500 teams, xwOBA .310-.380, position fit
     Pitchers: on sub-.500 teams, xwOBA_against <= .310, reliever
+
+    `stats` (from _stats_to_improve()) drives batter position filtering --
+    only players at a position the team is actually flagged weak at are
+    surfaced, instead of any high-xwOBA hitter leaguewide regardless of
+    whether the team needs that position at all.
     """
+    weak_codes = _weak_positions(stats or [])
+    if weak_codes:
+        print(f"  [targets] filtering batters to positions the team "
+              f"actually needs: {sorted(weak_codes)}")
+    else:
+        print("  [targets] no specific position weakness flagged -- "
+              "showing all qualifying batters")
+
     all_bat = _safe(data, "batting",  "all_players")
     all_pit = _safe(data, "pitching", "all_players")
     sc_bat  = _safe(data, "statcast", "batters")
     sc_pit  = _safe(data, "statcast", "pitchers")
+
+    seller_teams = _compute_seller_teams(data)
+    if seller_teams:
+        print(f"  [targets] {len([s for s in seller_teams if len(s) > 3])} "
+              f"teams flagged as likely sellers based on live standings")
 
     # live roster, not a hardcoded list -- see roster.py. Updates
     # automatically after trades/call-ups instead of needing manual edits.
@@ -450,13 +574,33 @@ def _find_targets(data: dict) -> dict:
             ]
             UNTOUCHABLE = {key_from_first_last(n) for n in UNTOUCHABLE_NAMES}
 
+            # players who statistically fit but aren't realistic sells --
+            # their team isn't rebuilding, they're extension/franchise
+            # pieces, etc. This is a JUDGMENT CALL list, not something
+            # derivable from stats -- update it by hand as team situations
+            # change (same maintenance model as SELLER_TEAMS/IL_RETURNS).
+            # Last reviewed 2026-07-28 against current team competitiveness.
+            NOT_AVAILABLE_NAMES = [
+                "Ben Rice", "Nick Kurtz", "Willson Contreras",
+                "Jonathan Aranda", "Paul Goldschmidt", "Brandon Nimmo",
+                "Munetaka Murakami", "Cody Bellinger", "Spencer Steer",
+                "Kyle Schwarber", "Matt Olson", "Junior Caminero",
+                "Bryan Reynolds", "Pete Alonso", "Taylor Ward",
+                "Otto Lopez", "Curtis Mead", "Sal Stewart",
+                "Samuel Basallo", "Dalton Rushing", "Corbin Carroll",
+                "Bryce Eldridge", "Justin Foscue",
+            ]
+            NOT_AVAILABLE = {key_from_first_last(n) for n in NOT_AVAILABLE_NAMES}
+
             mask = (
                 (merged["xwOBA"]   >= 0.330) &
                 (merged["xwOBA"]   <= 0.420) &
                 (merged["Barrel%"] >= 8.0)   &
                 (merged["PA"]      >= 100)   &
                 (~merged["_key"].apply(_is_mariner_key)) &
-                (~merged["_key"].isin(UNTOUCHABLE))
+                (~merged["_key"].isin(UNTOUCHABLE)) &
+                (~merged["_key"].isin(NOT_AVAILABLE)) &
+                (merged["Pos"].apply(lambda p: _pos_matches_need(p, weak_codes)))
             )
             tgt = (merged[mask]
                    .sort_values("xwOBA", ascending=False)
@@ -542,10 +686,21 @@ def _find_targets(data: dict) -> dict:
                     merged_p[c] = pd.to_numeric(merged_p[c], errors="coerce")
 
             # filter -- all teams, just exclude current Mariners
+            # same judgment-call mechanism as NOT_AVAILABLE_NAMES for
+            # batters -- pitchers confirmed locked up, no-trade clauses,
+            # or already dealt to a contender this deadline season.
+            # Last reviewed 2026-07-31.
+            NOT_AVAILABLE_PITCHERS = [
+                "Josh Hader",     # full no-trade clause, signed thru 2028
+                "A.J. Minter",    # just traded Mets->Twins, Twins are buyers
+            ]
+            NOT_AVAILABLE_P = {key_from_first_last(n) for n in NOT_AVAILABLE_PITCHERS}
+
             mask_p = (
                 (merged_p["xwOBA_against"] <= 0.310) &
                 (merged_p["IP"]            >= 20)    &
-                (~merged_p["_key"].apply(lambda k: k.split("_")[0] in MARINERS_ROSTER))
+                (~merged_p["_key"].apply(lambda k: k.split("_")[0] in MARINERS_ROSTER)) &
+                (~merged_p["_key"].isin(NOT_AVAILABLE_P))
             )
             print(f"  [debug] pitcher merge cols with team: {[c for c in merged_p.columns if any(t in c.lower() for t in ['team','tm','name'])]}")
             ptgt = merged_p[mask_p].sort_values(
@@ -571,7 +726,7 @@ def _find_targets(data: dict) -> dict:
                         if _v and str(_v) not in ("nan","","None"):
                             team_val_p = str(_v)
                             break
-                avail_p = _avail_p(team_val_p or "")
+                avail_p = _avail_p(team_val_p or "", seller_teams)
                 pitcher_targets.append({
                     "name":         player_name,
                     "team":         team_val_p or "N/A",
@@ -678,7 +833,7 @@ def _season_outlook(analysis, data):
 def generate_recommendations(data, analysis, grades):
     print("\n[recommend] Generating recommendations...")
     stats          = _stats_to_improve(data)
-    player_targets = _find_targets(data)
+    player_targets = _find_targets(data, stats)
     recs  = {
         "generated":        str(date.today()),
         "diagnosis":        _team_diagnosis(analysis),
