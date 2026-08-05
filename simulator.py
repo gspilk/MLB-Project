@@ -3,8 +3,10 @@ simulator.py
 Simulates the Mariners rest-of-season record under different scenarios.
 
 Models:
-  - IL returns (known dates)
-  - Deadline acquisitions (hypothetical)
+  - IL returns (known dates, hand-maintained in IL_RETURNS)
+  - Confirmed deadline acquisitions (Ward, Dominguez -- real, not
+    hypothetical; the pre-deadline "what if we trade for X" scenario
+    system was retired 2026-08-03 once the deadline passed)
   - Schedule difficulty
   - Luck correction
   - Pythagorean projection
@@ -45,178 +47,132 @@ IL_RETURNS = [
     # past return_date keeps contributing at close to full weight instead of
     # zeroing out. Remove (don't just leave) an entry as soon as a player is
     # confirmed back, rather than trusting the date math to handle it.
-    {
-
-        "name":         "Rob Refsnyder",
-        "pos":          "DH",
-        "return_date":  date(2026, 7, 10),
-        "early_return": date(2026, 7, 10),
-        "late_return":  date(2026, 7, 10),
-        "rs_impact":    0.00,
-        "ra_impact":    0.00,
-        "confidence":   "N/A",
-        "note":         "DFA on return - no impact",
-    },
-    {
-        "name":         "Brendan Donovan",
-        "pos":          "3B",
-        "return_date":  date(2026, 7, 17),   # team estimate
-        "early_return": date(2026, 7, 14),
-        "late_return":  date(2026, 7, 24),
-        "rs_impact":    0.14,
-        "ra_impact":    0.00,
-        "confidence":   "MEDIUM",
-        "note":         ".839 OPS when healthy - est Jul 17",
-    },
+    #
+    # Brendan Donovan removed 2026-08-03: MLB.com confirms he's been cleared
+    # and activated (same reasoning as Julio above -- don't leave a "removed"
+    # player's entry in place with a stale future date).
+    #
+    # Rob Refsnyder entry removed too: rs_impact/ra_impact were already 0
+    # ("DFA on return - no impact"), so it was contributing nothing -- dead
+    # weight, not worth keeping around.
+    #
+    # J.P. Crawford ADDED 2026-08-03: placed on 10-day IL July 19 with wrist
+    # inflammation (Fox 13 Seattle). Hollander said "couple weeks" -- treated
+    # as MEDIUM confidence given that's a specific-enough estimate.
+    #
+    # Vargas/Brash/Criswell dates updated 2026-08-03 from GM Justin
+    # Hollander's own public timeline updates (union-bulletin.com,
+    # sports.mynorthwest.com, MLB.com, Yahoo Sports -- all within the last
+    # week) -- the old dates here (Jul 20 for Brash, Aug 3 for Vargas, Aug 15
+    # for Criswell) were significantly out of date; all three slipped later
+    # into August than originally hoped.
     {
         "name":         "Will Wilson",
         "pos":          "3B",
-        "return_date":  date(2026, 7, 20),   # team estimate
-        "early_return": date(2026, 7, 17),
-        "late_return":  date(2026, 7, 27),
-        "rs_impact":    0.04,
+        "return_date":  date(2026, 7, 20),   # UNVERIFIED as of 2026-08-03 --
+        "early_return": date(2026, 7, 17),   # this date is carried over from
+        "late_return":  date(2026, 7, 27),   # an earlier update and was NOT
+        "rs_impact":    0.04,                # rechecked in this pass. Confirm
+        "ra_impact":    0.00,                # his actual current status before
+        "confidence":   "LOW",               # trusting this entry -- lowered
+        "note":         "Bench depth -- status not reconfirmed 2026-08-03, "
+                        "treat this date as stale until verified",
+    },
+    {
+        "name":         "J.P. Crawford",
+        "pos":          "SS",
+        "return_date":  date(2026, 8, 2),    # "couple weeks" from Jul 19
+        "early_return": date(2026, 7, 28),
+        "late_return":  date(2026, 8, 9),
+        "rs_impact":    0.10,
         "ra_impact":    0.00,
         "confidence":   "MEDIUM",
-        "note":         "Bench depth - est Jul 20",
+        "note":         "Elite OBP/walk rate -- 10-day IL, wrist inflammation, "
+                        "placed Jul 19 (Rivas recalled in corresponding move)",
     },
     {
         "name":         "Matt Brash",
         "pos":          "RP",
-        "return_date":  date(2026, 7, 20),   # estimated from 15-day IL
-        "early_return": date(2026, 7, 17),
-        "late_return":  date(2026, 7, 31),
+        "return_date":  date(2026, 8, 25),   # "Aug 22-28 range" per Hollander
+        "early_return": date(2026, 8, 20),
+        "late_return":  date(2026, 9, 1),
         "rs_impact":    0.00,
         "ra_impact":    0.10,
         "confidence":   "MEDIUM",
-        "note":         "0.54 ERA closer - est Jul 20 from 15-day IL",
+        "note":         "0.54 ERA closer -- right lat inflammation, "
+                        "targeting Aug 22-28 return",
     },
     {
         "name":         "Carlos Vargas",
         "pos":          "RP",
-        "return_date":  date(2026, 8, 3),    # team estimate
-        "early_return": date(2026, 7, 28),
-        "late_return":  date(2026, 8, 17),
+        "return_date":  date(2026, 8, 15),   # Hollander's stated target
+        "early_return": date(2026, 8, 12),
+        "late_return":  date(2026, 8, 22),
         "rs_impact":    0.00,
         "ra_impact":    0.05,
-        "confidence":   "LOW",               # 60-day IL, uncertain
-        "note":         "Bullpen depth - est Aug 3 from 60-day IL",
+        "confidence":   "MEDIUM",            # was LOW; now a specific,
+                                              # recently-reaffirmed date
+        "note":         "Bullpen depth -- right lat strain, tentatively "
+                        "scheduled to return Aug 15",
     },
     {
         "name":         "Cooper Criswell",
         "pos":          "RP",
-        "return_date":  date(2026, 8, 15),   # estimated
-        "early_return": date(2026, 8, 1),
-        "late_return":  date(2026, 9, 1),
+        "return_date":  date(2026, 8, 30),   # "Aug 28-Sept 1" per Hollander
+        "early_return": date(2026, 8, 28),
+        "late_return":  date(2026, 9, 5),
         "rs_impact":    0.00,
         "ra_impact":    0.04,
-        "confidence":   "LOW",
-        "note":         "60-day IL - return date uncertain",
+        "confidence":   "LOW",               # furthest out, most uncertain
+        "note":         "Right shoulder/pec strain -- targeting Aug 28-Sept 1 return",
     },
 ]
 
-# -- deadline acquisition profiles ---------------------------------------------
-# HAND-MAINTAINED SNAPSHOT, same maintenance model as IL_RETURNS above and
-# NOT_AVAILABLE_NAMES/NOT_AVAILABLE_PITCHERS in recommender.py -- these
-# entries need periodic reconciliation against that file, since this dict
-# is completely separate from recommender.py's live target search and can
-# silently drift out of sync with it. That already happened once: Bryce
-# Eldridge and Willson Contreras were both still listed here as viable
-# acquisitions after recommender.py's NOT_AVAILABLE_NAMES had already
-# ruled them out (Eldridge is the Giants' franchise 1B they're building
-# around; Contreras has no-trade protection) -- the scenarios below were
-# quietly running win projections around trading for players who were
-# never realistically available. Swapped in players actually confirmed
-# available via recommender.py + real reporting as of 2026-07-31.
-ACQUISITION_PROFILES = {
-    "Dominic Smith": {
-        "pos":       "1B/DH",
-        "xwoba":     0.357,
-        "rs_impact": 0.10,   # replaces below average 1B production
+# -- confirmed deadline acquisitions ---------------------------------------
+# RETIRED 2026-08-03: this used to hold ~10 hypothetical trade targets
+# (Dominic Smith, JJ Bleday, Carlos Cortes, Dylan Lee, Raisel Iglesias,
+# etc.) for pre-deadline "what if we get X" scenario modeling. The
+# deadline has now passed -- none of those players were actually
+# acquired, and no more trades are coming this season. Modeling win
+# projections around them any further would be pure fiction.
+#
+# What replaces it: the two players ACTUALLY acquired (Ward, Dominguez),
+# treated the same way IL_RETURNS treats a returning player -- a
+# temporary modeled boost that should be REMOVED (not just left with a
+# stale flag) once their production is naturally absorbed into
+# CURRENT_RS_G/CURRENT_RA_G. Those two are pulled live from the team-wide
+# batting/pitching overview in main.py, so once Ward and Dominguez have
+# played enough games as Mariners for the team-wide averages to reflect
+# them, this entry becomes redundant/double-counting -- same failure mode
+# documented for Julio and Donovan in IL_RETURNS above. Check periodically
+# and remove once their stats are clearly baked into the live team
+# numbers rather than trusting a fixed date.
+ACTUAL_ACQUISITIONS = {
+    "Taylor Ward": {
+        "pos":       "OF",
+        "xwoba":     0.346,
+        "rs_impact": 0.10,   # .729 OPS, 98th-percentile walk rate --
+                              # clear offensive upgrade at a real need
         "ra_impact": 0.00,
-        "cost":      "Waiver claim / cash",
-        "note":      "Cheap ATL DH, squeezed by Acuna/Murphy returns",
-        "available": True,
+        "cost":      "Alex Hoppe + 2 low-level pitching prospects",
+        "note":      "Acquired from BAL 2026-08-03. .383 OBP -- highest "
+                     "of any regular in the lineup. Pushes Robles to bench.",
+        "acquired_date": date(2026, 8, 3),
     },
-    "JJ Bleday": {
-        "pos":       "OF/DH",
-        "xwoba":     0.399,
-        "rs_impact": 0.10,
-        "ra_impact": 0.00,
-        "cost":      "Low prospect",
-        "note":      "OF depth, .399 xwOBA, 14 HR",
-        "available": True,
-    },
-    "Ryan Jeffers": {
-        "pos":       "C/DH",
-        "xwoba":     0.389,
-        "rs_impact": 0.08,
-        "ra_impact": 0.00,
-        "cost":      "Low-mid prospect",
-        "note":      ".949 OPS, insurance/DH flexibility",
-        "available": True,
-    },
-    "Dillon Dingler": {
-        "pos":       "C/DH",
-        "xwoba":     0.409,
-        "rs_impact": 0.11,
-        "ra_impact": 0.00,
-        "cost":      "Mid prospect",
-        "note":      "Tigers seller, .409 xwOBA, 19 HR",
-        "available": True,
-    },
-    "Miguel Vargas": {
-        "pos":       "3B/DH",
-        "xwoba":     0.397,
-        "rs_impact": 0.09,
-        "ra_impact": 0.00,
-        "cost":      "Low prospect",
-        "note":      "Versatile, .397 xwOBA, 20 HR",
-        "available": True,
-    },
-    "Carlos Cortes": {
-        "pos":       "OF/DH",
-        "xwoba":     0.384,
-        "rs_impact": 0.09,
-        "ra_impact": 0.00,
-        "cost":      "Low prospect",
-        "note":      "A's breakout OF, minor-league find, no long-term commitment",
-        "available": True,
-    },
-    "Dylan Lee": {
+    "Seranthony Dominguez": {
         "pos":       "RP",
-        "xwoba_against": 0.209,
+        "xwoba_against": 0.327,
         "rs_impact": 0.00,
-        "ra_impact": 0.09,
-        "cost":      "Waiver/Low prospect",
-        "note":      "Elite .209 xwOBA, 1.52 ERA",
-        "available": True,
-    },
-    "Raisel Iglesias": {
-        "pos":       "RP",
-        "xwoba_against": 0.227,
-        "rs_impact": 0.00,
-        "ra_impact": 0.07,
-        "cost":      "Low-mid prospect",
-        "note":      "Veteran closer/setup, 2.30 ERA",
-        "available": True,
-    },
-    "Louis Varland": {
-        "pos":       "RP",
-        "xwoba_against": 0.216,
-        "rs_impact": 0.00,
-        "ra_impact": 0.08,
-        "cost":      "Low prospect",
-        "note":      "Elite .216 xwOBA, 0.94 ERA",
-        "available": True,
-    },
-    "Dylan Dodd": {
-        "pos":       "RP",
-        "xwoba_against": 0.229,
-        "rs_impact": 0.00,
-        "ra_impact": 0.06,
-        "cost":      "Waiver",
-        "note":      "Solid depth, 2.08 ERA",
-        "available": True,
+        "ra_impact": 0.02,   # modest -- his .327 xwOBA against is worse
+                              # than every current core bullpen arm; this
+                              # is bullpen depth, not a clear upgrade (see
+                              # deadline_trade_comparison.py for the full
+                              # stat-by-stat breakdown backing this call)
+        "cost":      "Luis Castillo",
+        "note":      "Acquired from CHW 2026-08-03 for Castillo. Lost "
+                     "closer job in late June; projects as setup/middle "
+                     "relief behind Munoz, not closer competition.",
+        "acquired_date": date(2026, 8, 3),
     },
 }
 
@@ -312,7 +268,7 @@ def _build_scenario(name: str,
 
     Parameters:
         name:              scenario name
-        acquisitions:      list of player names from ACQUISITION_PROFILES
+        acquisitions:      list of player names from ACTUAL_ACQUISITIONS
         il_returns:        list of IL player names (None = all)
         include_luck:      apply luck correction
         use_early_returns: use optimistic early return dates
@@ -349,22 +305,25 @@ def _build_scenario(name: str,
                 "note":    player["note"],
             })
 
-    # -- acquisitions --
-    deadline_date   = date(2026, 7, 31)
-    deadline_frac   = _calc_il_impact(deadline_date)
+    # -- confirmed acquisitions --
+    # Full weight (not a fractional "days since deadline" estimate like the
+    # old hardcoded July 31 reference used) -- Ward and Dominguez are
+    # CONFIRMED active on the roster right now, not a hypothetical future
+    # pickup, so there's no ambiguity about "when did they join" to model
+    # around. All GAMES_REMAINING games get their impact applied.
     for acq_name in acquisitions:
-        if acq_name not in ACQUISITION_PROFILES:
+        if acq_name not in ACTUAL_ACQUISITIONS:
             continue
-        acq    = ACQUISITION_PROFILES[acq_name]
-        rs_add = acq["rs_impact"] * deadline_frac
-        ra_sub = acq["ra_impact"] * deadline_frac
+        acq    = ACTUAL_ACQUISITIONS[acq_name]
+        rs_add = acq["rs_impact"]
+        ra_sub = acq["ra_impact"]
         rs_g  += rs_add
         ra_g  -= ra_sub
         impacts.append({
             "source": f"Acquired: {acq_name}",
             "rs":     round(rs_add, 3),
             "ra":     round(-ra_sub, 3),
-            "games":  round(deadline_frac * GAMES_REMAINING),
+            "games":  GAMES_REMAINING,
             "note":   acq["note"],
             "cost":   acq.get("cost",""),
         })
@@ -411,86 +370,72 @@ def run_simulation(custom_acquisitions: list = None) -> dict:
     """
     Runs all preset scenarios + optional custom scenario.
 
+    RETIRED 2026-08-03: this used to include 5 scenarios built around
+    hypothetical pre-deadline targets (yes_targets, yes_plus_pitching,
+    maybe_targets, best_case, and part of il_pessimistic). The deadline
+    has passed and none of those players were acquired -- keeping them
+    would mean reporting win projections based on trades that never
+    happened. Replaced with scenarios reflecting what's actually true
+    now: IL-return timing (the real remaining uncertainty this season)
+    and the confirmed real acquisitions (Ward, Dominguez).
+
     Returns dict of scenario results.
     """
-    print("\n[simulate] Running deadline scenarios...")
+    print("\n[simulate] Running post-deadline scenarios...")
 
     scenarios = {}
 
-    # scenario 0: baseline (no moves, no IL returns)
+    # scenario 0: baseline (no IL returns, no acquisition impact modeled)
     scenarios["baseline"] = _build_scenario(
-        "Baseline - no moves, no IL returns",
+        "Baseline - no IL returns",
         acquisitions=[],
         il_returns=[],
         include_luck=False,
     )
 
-    # scenario 1: IL returns only (no deadline moves)
+    # scenario 1: IL returns only, acquisitions not modeled separately
+    # (their impact is already flowing into CURRENT_RS_G/RA_G naturally
+    # once they've played enough games -- see ACTUAL_ACQUISITIONS note)
     scenarios["il_only"] = _build_scenario(
-        "IL Returns Only - no deadline moves",
+        "IL Returns Only",
         acquisitions=[],
         il_returns=None,
         include_luck=True,
     )
 
-    # scenario 2: IL returns + your YES acquisitions
-    scenarios["yes_targets"] = _build_scenario(
-        "IL Returns + YES Targets (Eldridge + Bleday + Jeffers)",
-        acquisitions=["Dominic Smith", "JJ Bleday", "Ryan Jeffers"],
+    # scenario 2: IL returns + confirmed deadline acquisitions
+    scenarios["with_acquisitions"] = _build_scenario(
+        "IL Returns + Ward + Dominguez",
+        acquisitions=["Taylor Ward", "Seranthony Dominguez"],
         il_returns=None,
         include_luck=True,
     )
 
-    # scenario 3: IL returns + YES + pitching
-    scenarios["yes_plus_pitching"] = _build_scenario(
-        "IL Returns + YES + Pitching (+ Lee + Varland)",
-        acquisitions=["Dominic Smith", "JJ Bleday", "Ryan Jeffers",
-                      "Dylan Lee", "Louis Varland"],
-        il_returns=None,
-        include_luck=True,
-    )
-
-    # scenario 4: IL returns + MAYBE targets
-    scenarios["maybe_targets"] = _build_scenario(
-        "IL Returns + MAYBE (Dingler + Vargas + Contreras)",
-        acquisitions=["Dillon Dingler", "Miguel Vargas", "Carlos Cortes"],
-        il_returns=None,
-        include_luck=True,
-    )
-
-    # scenario 5: best case - all IL + all YES + pitching
-    scenarios["best_case"] = _build_scenario(
-        "Best Case - All IL + YES + Pitching",
-        acquisitions=["Dominic Smith", "JJ Bleday", "Ryan Jeffers",
-                      "Dylan Lee", "Louis Varland", "Raisel Iglesias"],
-        il_returns=None,
-        include_luck=True,
-    )
-
-    # scenario 6: worst case - no moves, injuries linger
+    # scenario 3: worst case - no IL returns land on schedule
     scenarios["worst_case"] = _build_scenario(
-        "Worst Case - No moves, Julio slow return",
+        "Worst Case - IL returns slip/setback",
         acquisitions=[],
-        il_returns=["Matt Brash", "Carlos Vargas", "Cooper Criswell"],
+        il_returns=["Matt Brash", "Carlos Vargas", "Cooper Criswell",
+                     "J.P. Crawford", "Will Wilson"],
         include_luck=False,
+        use_late_returns=True,
     )
 
-    # scenario 7: optimistic IL - everyone returns early
+    # scenario 4: optimistic IL - everyone returns early
     scenarios["il_optimistic"] = _build_scenario(
         "Optimistic IL - Everyone Returns Early",
-        acquisitions=[],
+        acquisitions=["Taylor Ward", "Seranthony Dominguez"],
         il_returns=None,
         include_luck=True,
         use_early_returns=True,
     )
 
-    # scenario 8: pessimistic IL - setbacks happen
+    # scenario 5: pessimistic IL - setbacks happen
     scenarios["il_pessimistic"] = _build_scenario(
         "Pessimistic IL - Setbacks, Late Returns",
-        acquisitions=["Dominic Smith", "Dylan Lee"],
+        acquisitions=["Taylor Ward", "Seranthony Dominguez"],
         il_returns=None,
         include_luck=False,
-        use_early_returns=False,
         use_late_returns=True,
     )
 
@@ -545,7 +490,7 @@ def project_division(sea_final_w: int) -> dict:
 # -- pretty print --------------------------------------------------------------
 def print_simulation(scenarios: dict):
     print(f"\n{'='*70}")
-    print(f"SEATTLE MARINERS - DEADLINE ACQUISITION SIMULATOR")
+    print(f"SEATTLE MARINERS - STRETCH RUN SIMULATOR")
     print(f"As of: {CURRENT_DATE}  |  Record: {CURRENT_W}-{CURRENT_L}")
     print(f"Games remaining: {GAMES_REMAINING}  |  Luck: {CURRENT_LUCK}")
     print(f"{'='*70}")
@@ -603,7 +548,8 @@ if __name__ == "__main__":
     scenarios = run_simulation()
     print_simulation(scenarios)
 
-    # example custom scenario
-    print("\n-- CUSTOM SCENARIO: Just Eldridge + Lee --")
-    custom = run_simulation(["Dominic Smith", "Dylan Lee"])
+    # example custom scenario -- IL returns without Dominguez's modest
+    # impact, isolating just Ward's contribution
+    print("\n-- CUSTOM SCENARIO: Just Ward, no Dominguez --")
+    custom = run_simulation(["Taylor Ward"])
     print_simulation({"custom": custom["custom"]})
