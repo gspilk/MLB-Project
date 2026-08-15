@@ -69,26 +69,41 @@ IL_RETURNS = [
     {
         "name":         "Will Wilson",
         "pos":          "3B",
-        "return_date":  date(2026, 7, 20),   # UNVERIFIED as of 2026-08-03 --
-        "early_return": date(2026, 7, 17),   # this date is carried over from
-        "late_return":  date(2026, 7, 27),   # an earlier update and was NOT
-        "rs_impact":    0.04,                # rechecked in this pass. Confirm
-        "ra_impact":    0.00,                # his actual current status before
-        "confidence":   "LOW",               # trusting this entry -- lowered
-        "note":         "Bench depth -- status not reconfirmed 2026-08-03, "
-                        "treat this date as stale until verified",
+        "return_date":  date(2026, 9, 15),   # confirmed still on 60-day IL
+        "early_return": date(2026, 9, 1),    # (thumb) as of Aug 6-9 per
+        "late_return":  date(2026, 9, 28),   # KJR radio report -- no specific
+        "rs_impact":    0.02,                # target date given anywhere,
+        "ra_impact":    0.00,                # so this is a wide, genuinely
+        "confidence":   "LOW",               # low-confidence guess, not a
+        "note":         "Bench depth -- confirmed still on 60-day IL "
+                        "(thumb) as of Aug 6-9, no target date reported",
     },
     {
         "name":         "J.P. Crawford",
         "pos":          "SS",
-        "return_date":  date(2026, 8, 2),    # "couple weeks" from Jul 19
-        "early_return": date(2026, 7, 28),
-        "late_return":  date(2026, 8, 9),
-        "rs_impact":    0.10,
-        "ra_impact":    0.00,
-        "confidence":   "MEDIUM",
-        "note":         "Elite OBP/walk rate -- 10-day IL, wrist inflammation, "
-                        "placed Jul 19 (Rivas recalled in corresponding move)",
+        "return_date":  date(2026, 9, 5),    # the old Aug 2 estimate was
+        "early_return": date(2026, 8, 25),   # WRONG -- confirmed via a live
+        "late_return":  date(2026, 9, 15),   # bbref fetch that he's STILL on
+        "rs_impact":    0.10,                # the IL as of Aug 14. A separate
+        "ra_impact":    0.00,                # report said "down 3-5 days
+        "confidence":   "LOW",               # after an injection, then ramp
+        "note":         "Elite OBP/walk rate -- still on IL as of Aug 14 "
+                        "(confirmed via live bbref fetch), well past the "
+                        "earlier Aug 2 estimate. Re-verify before trusting "
+                        "this date either.",
+    },
+    {
+        "name":         "Cole Wilcox",
+        "pos":          "RP",
+        "return_date":  date(2026, 8, 28),   # oblique strains typically
+        "early_return": date(2026, 8, 21),   # 3-4 weeks; official word is
+        "late_return":  date(2026, 9, 10),   # just "TBD" as of Aug 7, so
+        "rs_impact":    0.00,                # this is an estimate, not a
+        "ra_impact":    0.03,                # reported target
+        "confidence":   "LOW",
+        "note":         "Left oblique strain, placed Aug 7. Was a "
+                        "dependable reliever pre-injury (4.00 ERA, 27 IP) "
+                        "-- no official target date reported yet",
     },
     {
         "name":         "Matt Brash",
@@ -105,15 +120,16 @@ IL_RETURNS = [
     {
         "name":         "Carlos Vargas",
         "pos":          "RP",
-        "return_date":  date(2026, 8, 15),   # Hollander's stated target
-        "early_return": date(2026, 8, 12),
-        "late_return":  date(2026, 8, 22),
-        "rs_impact":    0.00,
-        "ra_impact":    0.05,
-        "confidence":   "MEDIUM",            # was LOW; now a specific,
-                                              # recently-reaffirmed date
-        "note":         "Bullpen depth -- right lat strain, tentatively "
-                        "scheduled to return Aug 15",
+        "return_date":  date(2026, 8, 22),   # pushed back from Aug 15 --
+        "early_return": date(2026, 8, 18),   # confirmed "about to begin a
+        "late_return":  date(2026, 8, 28),   # rehab assignment" as of
+        "rs_impact":    0.00,                # ~Aug 14, and rehab stints
+        "ra_impact":    0.05,                # themselves typically run
+        "confidence":   "MEDIUM",            # 1-2 weeks before MLB
+                                              # activation
+        "note":         "Bullpen depth -- right lat strain, beginning "
+                        "rehab assignment as of mid-Aug after missing "
+                        "116 straight games",
     },
     {
         "name":         "Cooper Criswell",
@@ -148,30 +164,48 @@ IL_RETURNS = [
 # and remove once their stats are clearly baked into the live team
 # numbers rather than trusting a fixed date.
 ACTUAL_ACQUISITIONS = {
+    # UPDATED 2026-08-14 -- both entries below originally carried PRE-TRADE
+    # stats (Ward's Angels/Orioles numbers, Dominguez's White Sox numbers),
+    # which was wrong the moment they actually started playing for Seattle.
+    # Their real Mariners debuts, confirmed via a live bbref fetch:
+    #   Ward:      8 G, 32 PA,  .156 BA / .375 OPS
+    #   Dominguez: 5 G, 3.1 IP, 10.80 ERA, 3.000 WHIP
+    # Both samples are tiny and noisy -- not something to build confident
+    # going-forward expectations on. More importantly: since CURRENT_RS_G/
+    # CURRENT_RA_G are pulled live from TEAM-WIDE stats in main.py, these
+    # few games are already baked into that team average. Keeping a large
+    # separate rs_impact/ra_impact boost here would double-count them, the
+    # same failure mode documented for Julio/Donovan in IL_RETURNS above --
+    # just smaller in scale (a few games out of ~120 played, not a whole
+    # player's absence). Impacts brought down toward near-zero for that
+    # reason, not because they've been bad -- there just isn't a clean way
+    # to model "expected future value" on top of team-wide stats that
+    # already include them.
     "Taylor Ward": {
         "pos":       "OF",
-        "xwoba":     0.346,
-        "rs_impact": 0.10,   # .729 OPS, 98th-percentile walk rate --
-                              # clear offensive upgrade at a real need
+        "xwoba":     0.346,   # xwOBA still their pre-trade rate; early
+                              # Mariners OPS (.375) is real but too small
+                              # a sample to trust over that established rate
+        "rs_impact": 0.02,
         "ra_impact": 0.00,
         "cost":      "Alex Hoppe + 2 low-level pitching prospects",
-        "note":      "Acquired from BAL 2026-08-03. .383 OBP -- highest "
-                     "of any regular in the lineup. Pushes Robles to bench.",
+        "note":      "Acquired from BAL 2026-08-03. Rough Mariners debut "
+                     "so far (8 G, .375 OPS) -- small sample, already "
+                     "reflected in team-wide stats, watch for regression "
+                     "toward his established .729 OPS rate either way.",
         "acquired_date": date(2026, 8, 3),
     },
     "Seranthony Dominguez": {
         "pos":       "RP",
         "xwoba_against": 0.327,
         "rs_impact": 0.00,
-        "ra_impact": 0.02,   # modest -- his .327 xwOBA against is worse
-                              # than every current core bullpen arm; this
-                              # is bullpen depth, not a clear upgrade (see
-                              # deadline_trade_comparison.py for the full
-                              # stat-by-stat breakdown backing this call)
+        "ra_impact": 0.00,
         "cost":      "Luis Castillo",
-        "note":      "Acquired from CHW 2026-08-03 for Castillo. Lost "
-                     "closer job in late June; projects as setup/middle "
-                     "relief behind Munoz, not closer competition.",
+        "note":      "Acquired from CHW 2026-08-03 for Castillo. Rough "
+                     "Mariners debut (5 G, 3.1 IP, 10.80 ERA) -- tiny "
+                     "sample, already reflected in team-wide stats. Was "
+                     "already a modest-at-best add per deadline_trade_"
+                     "comparison.py's stat-by-stat breakdown even before this.",
         "acquired_date": date(2026, 8, 3),
     },
 }
@@ -416,7 +450,7 @@ def run_simulation(custom_acquisitions: list = None) -> dict:
         "Worst Case - IL returns slip/setback",
         acquisitions=[],
         il_returns=["Matt Brash", "Carlos Vargas", "Cooper Criswell",
-                     "J.P. Crawford", "Will Wilson"],
+                     "J.P. Crawford", "Will Wilson", "Cole Wilcox"],
         include_luck=False,
         use_late_returns=True,
     )
