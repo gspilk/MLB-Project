@@ -514,6 +514,22 @@ def analyze_roster_health(data: dict) -> dict:
                            ["Donovan","Raleigh","Robles","Speier"]):
                         result["returning_soon"].append(name)
 
+    # pitching was previously never scanned here -- IL pitchers (Brash,
+    # Criswell, Wilcox, etc.) were completely invisible in the "On IL"
+    # roster health summary even though their individual grade rows
+    # elsewhere in the report clearly showed the IL tag. Same scan logic
+    # as batting above, just against the pitching table too.
+    pitching = _safe_get(data, "seattle", "pitching")
+    if pitching is not None and not pitching.empty:
+        if "Name" in pitching.columns:
+            for _, row in pitching.iterrows():
+                name = str(row.get("Name",""))
+                if "IL" in name:
+                    result["on_il"].append(name)
+                    if any(p in name for p in
+                           ["Brash","Criswell","Vargas"]):
+                        result["returning_soon"].append(name)
+
     # known DFA candidates from Statcast
     # exclude franchise players and IL players
     EXCLUDE = ["Emerson", "Rodríguez", "Julio", "Raleigh",

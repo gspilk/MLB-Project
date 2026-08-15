@@ -579,6 +579,20 @@ def print_simulation(scenarios: dict):
 
 # -- test ----------------------------------------------------------------------
 if __name__ == "__main__":
+    # This file's CURRENT_W/CURRENT_L/GAMES_REMAINING/CURRENT_RS_G/RA_G
+    # constants at the top are PLACEHOLDER defaults, not live data.
+    # main.py overrides them with your real current record before calling
+    # run_simulation() -- running this file directly, standalone, skips
+    # that step entirely and silently uses whatever stale numbers happen
+    # to be sitting in this file (they get updated occasionally when this
+    # file itself is edited, but that's not the same as live data).
+    print("\n" + "!" * 70)
+    print("! WARNING: running simulator.py directly, NOT through main.py.")
+    print(f"! Using placeholder record {CURRENT_W}-{CURRENT_L}, NOT your")
+    print("! actual current record. Run `python main.py` instead for a")
+    print("! simulation based on real, live data.")
+    print("!" * 70)
+
     scenarios = run_simulation()
     print_simulation(scenarios)
 
