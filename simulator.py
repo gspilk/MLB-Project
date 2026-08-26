@@ -21,6 +21,19 @@ import pandas as pd
 from datetime import date, datetime
 
 # -- current team state --------------------------------------------------------
+# PLACEHOLDER DEFAULTS ONLY. Every one of these except CURRENT_DATE and
+# SEASON_GAMES gets overwritten by main.py before any real simulation runs
+# (search main.py for "sim_mod.CURRENT_W =", etc. -- it pulls your real,
+# live record/RS_G/RA_G/luck/ERA rank and sets these module attributes
+# directly). The numbers sitting here (47-47, RS_G 3.82...) are just
+# whatever was true whenever this file was last hand-edited -- they will
+# look stale almost immediately and that's expected, not a bug, AS LONG AS
+# you're running this through `python main.py`. Running simulator.py
+# directly skips that override step entirely and uses these placeholders
+# for real (see the loud warning in the __main__ block below) -- don't
+# trust standalone output, and don't "fix" these values by hand thinking
+# it'll help; main.py's live override makes the specific numbers here
+# irrelevant for any real run.
 CURRENT_DATE      = date.today()
 SEASON_GAMES      = 162
 CURRENT_W         = 47
@@ -212,23 +225,180 @@ ACTUAL_ACQUISITIONS = {
 
 # -- schedule difficulty -------------------------------------------------------
 SCHEDULE = {
-    "easy_games":    27,   # vs sub-.500 teams (24 + ~3 from next 7)
-    "hard_games":    16,   # vs TB/NYY/LAD etc (15 + TBR series)
-    "neutral_games": 25,   # everything else
-    "easy_winpct":   0.600,
-    "hard_winpct":   0.400,
-    "neutral_winpct":0.515,
-}
-# easy + hard + neutral = 68 total remaining
+    "easy_games":    27,   # DEPRECATED FALLBACK ONLY -- see
+    "hard_games":    16,   # compute_schedule_difficulty() below. This
+    "neutral_games": 25,   # fixed dict summed to 68 games, which was only
+    "easy_winpct":   0.600,  # correct back when GAMES_REMAINING was 68 (near
+    "hard_winpct":   0.400,  # the trade deadline). As the season correctly
+    "neutral_winpct":0.515,  # ticks GAMES_REMAINING down, this fixed count
+}                            # implies MORE remaining games than actually
+# exist, which silently produces a mathematically impossible >100% blended
+# win rate in _project_games() the closer the season gets to ending -- a
+# real bug that got worse every single day post-deadline (verified: at
+# GAMES_REMAINING=68 this gives a sane 52.2% base rate; at 25 it gives an
+# impossible 141.9%). Only used now as an emergency fallback if live
+# schedule/standings data isn't available for some reason.
+
+
+def apply_live_state(data: dict, analysis: dict) -> None:
+    """
+    Pulls real, current team state (record, RS/G, RA/G, luck, ERA rank)
+    from already-built data/analysis and updates this module's globals.
+
+    MOVED HERE 2026-08-26 from main.py, where this exact logic used to
+    live as an external "reach into simulator.py and overwrite its
+    module attributes" block. That pattern was fragile in practice --
+    it's exactly what caused several real sync bugs this session, where
+    simulator.py got updated but main.py's override block didn't (or
+    vice versa), silently producing wrong results. Moving it here makes
+    simulator.py responsible for its own live state instead of
+    depending on an external caller to patch it correctly every time.
+
+    Call this before run_simulation() if you want live data applied --
+    or just pass `data`/`analysis` directly to run_simulation(), which
+    calls this automatically. If this is never called, the placeholder
+    constants above remain in effect (with the loud __main__ warning).
+    """
+    global CURRENT_W, CURRENT_L, GAMES_REMAINING, CURRENT_LUCK
+    global CURRENT_ERA_RANK, CURRENT_RS_G, CURRENT_RA_G
+
+    standings = analysis.get("standings", {})
+    record = standings.get("record")
+    if not record:
+        print("  [warn] no live record available in apply_live_state() -- "
+              "leaving current module state as-is (may be placeholders)")
+        return
+
+    try:
+        w, l = map(int, record.split("-"))
+    except (ValueError, AttributeError):
+        print(f"  [warn] could not parse record '{record}' in apply_live_state()")
+        return
+
+    CURRENT_W       = w
+    CURRENT_L       = l
+    GAMES_REMAINING = 162 - w - l
+    CURRENT_LUCK    = float(standings.get("luck", -2.0) or -2.0)
+
+    era_rank = analysis.get("pitching", {}).get("team_era_rank")
+    if era_rank:
+        CURRENT_ERA_RANK = era_rank
+
+    ov_bat = data.get("overview", {}).get("batting")
+    if ov_bat is not None and not ov_bat.empty:
+        tm = next((c for c in ["Tm", "Team"] if c in ov_bat.columns), None)
+        if tm:
+            sea = ov_bat[ov_bat[tm].str.contains("Seattle", na=False)]
+            if not sea.empty:
+                r_val = pd.to_numeric(sea["R"].values[0], errors="coerce")
+                g_val = pd.to_numeric(sea["G"].values[0], errors="coerce")
+                if r_val and g_val and g_val > 0:
+                    CURRENT_RS_G = round(r_val / g_val, 2)
+
+    ov_pit = data.get("overview", {}).get("pitching")
+    if ov_pit is not None and not ov_pit.empty:
+        tm = next((c for c in ["Tm", "Team"] if c in ov_pit.columns), None)
+        if tm:
+            sea = ov_pit[ov_pit[tm].str.contains("Seattle", na=False)]
+            if not sea.empty:
+                for col in ["RA", "R", "RA9"]:
+                    if col in sea.columns:
+                        ra_val = pd.to_numeric(sea[col].values[0], errors="coerce")
+                        g_val = pd.to_numeric(sea["G"].values[0], errors="coerce")
+                        if ra_val and g_val and g_val > 0:
+                            CURRENT_RA_G = round(ra_val / g_val, 2)
+                            break
+
+    print(f"  [sim] Live state applied: {CURRENT_W}-{CURRENT_L}  "
+          f"RS/G {CURRENT_RS_G}  RA/G {CURRENT_RA_G}  Luck {CURRENT_LUCK}")
+
+
+def compute_schedule_difficulty(data: dict) -> dict:
+    """
+    Builds a SCHEDULE-shaped dict from the ACTUAL remaining schedule and
+    ACTUAL current opponent records, instead of a fixed guess made once
+    near the trade deadline. Classifies each remaining game as easy/hard/
+    neutral based on the opponent's real current win%, so this scales
+    correctly with GAMES_REMAINING no matter how far into the season you
+    are -- it can never produce more games than actually remain.
+
+    Falls back to the stale SCHEDULE dict above (with a warning) only if
+    live schedule/standings data isn't available.
+    """
+    # BUG FIX 2026-08-26: mariners_schedule_scraper.py deliberately splits
+    # upcoming games into next7 (the next 7 games, for a separate
+    # checklist display) and remaining (everything AFTER those 7) -- so
+    # data["schedule"]["remaining"] alone is NOT the full remaining
+    # schedule, it's missing exactly the next 7 games. This silently
+    # undercounted the real remaining schedule by 7 games (about a
+    # quarter of what's actually left this late in the season) in every
+    # calculation that used this function. Combine both pieces to get
+    # the true full remaining schedule.
+    remaining_only = data.get("schedule", {}).get("remaining")
+    next7 = data.get("schedule", {}).get("next7")
+    if remaining_only is not None and next7 is not None and not next7.empty:
+        remaining = pd.concat([next7, remaining_only], ignore_index=True)
+    else:
+        remaining = remaining_only
+
+    all_teams = data.get("standings", {}).get("all_teams")
+
+    if remaining is None or remaining.empty or all_teams is None or all_teams.empty:
+        print("  [warn] no live schedule/standings -- falling back to "
+              "stale hardcoded SCHEDULE, results may not be trustworthy")
+        return dict(SCHEDULE)
+
+    # map full team name -> win% for quick lookup; "Opp" column uses
+    # 3-letter abbreviations, so build an abbreviation map too. Lowercase
+    # both sides consistently -- TEAM_ABBR (reused from recommender.py)
+    # stores lowercase full names, but standings data has proper-case
+    # names ("Chicago Cubs"), so this would silently never match without
+    # normalizing both to the same case.
+    name_to_pct = dict(zip(
+        all_teams["Tm"].str.lower(),
+        pd.to_numeric(all_teams["W-L%"], errors="coerce")
+    ))
+
+    try:
+        from recommender import TEAM_ABBR
+        abbr_lookup = {v.upper(): k for k, v in TEAM_ABBR.items()}
+    except ImportError:
+        abbr_lookup = {}
+
+    easy = hard = neutral = 0
+    for opp in remaining["Opp"].dropna():
+        opp_key = str(opp).strip().upper()
+        full_name = abbr_lookup.get(opp_key)  # lowercase full name, or None
+        pct = name_to_pct.get(full_name) if full_name else None
+        if pct is None:
+            neutral += 1  # unknown opponent -- treat as neutral, safest default
+        elif pct < 0.450:
+            easy += 1
+        elif pct > 0.550:
+            hard += 1
+        else:
+            neutral += 1
+
+    total = easy + hard + neutral
+    if total == 0:
+        print("  [warn] could not classify any remaining games -- falling "
+              "back to stale hardcoded SCHEDULE")
+        return dict(SCHEDULE)
+
+    print(f"  [schedule] {total} remaining games classified: "
+          f"{easy} easy, {hard} hard, {neutral} neutral (live opponent records)")
+
+    return {
+        "easy_games": easy, "hard_games": hard, "neutral_games": neutral,
+        "easy_winpct": 0.600, "hard_winpct": 0.400, "neutral_winpct": 0.515,
+    }
 
 # -- division context ----------------------------------------------------------
-DIVISION = {
-    "SEA": {"w": 47, "l": 47, "name": "Seattle Mariners"},
-    "TEX": {"w": 47, "l": 46, "name": "Texas Rangers"},
-    "HOU": {"w": 46, "l": 49, "name": "Houston Astros"},
-    "ATH": {"w": 41, "l": 52, "name": "Athletics"},
-    "LAA": {"w": 24, "l": 72, "name": "Los Angeles Angels"},
-}
+# REMOVED 2026-08-26: this DIVISION dict (hardcoded records from way back --
+# "SEA 47-47", "TEX 47-46") was never actually referenced anywhere else in
+# this file. Fully dead code, fully superseded by compute_rival_projections()
+# above, which does the same job with live data. Left this note instead of
+# just silently deleting it in case anyone goes looking for it later.
 
 
 # -- core simulation functions -------------------------------------------------
@@ -296,7 +466,8 @@ def _build_scenario(name: str,
                     il_returns: list = None,
                     include_luck: bool = True,
                     use_early_returns: bool = False,
-                    use_late_returns: bool = False) -> dict:
+                    use_late_returns: bool = False,
+                    schedule: dict = None) -> dict:
     """
     Build a single scenario.
 
@@ -307,6 +478,12 @@ def _build_scenario(name: str,
         include_luck:      apply luck correction
         use_early_returns: use optimistic early return dates
         use_late_returns:  use pessimistic late return dates
+        schedule:          real schedule-difficulty dict from
+                           compute_schedule_difficulty(data), or None to
+                           fall back to the stale hardcoded SCHEDULE
+                           (see that dict's docstring for why the
+                           fallback shouldn't be trusted this late in
+                           the season)
     """
     rs_g = CURRENT_RS_G
     ra_g = CURRENT_RA_G
@@ -377,7 +554,7 @@ def _build_scenario(name: str,
 
     # -- project --
     win_pct    = _pythagorean_winpct(rs_g, ra_g)
-    proj_wins  = _project_games(win_pct) + luck_wins
+    proj_wins  = _project_games(win_pct, schedule=schedule or SCHEDULE) + luck_wins
     proj_losses = GAMES_REMAINING - (proj_wins - luck_wins) + 0
     proj_losses = GAMES_REMAINING - proj_wins
 
@@ -400,7 +577,8 @@ def _build_scenario(name: str,
 
 
 # -- preset scenarios ----------------------------------------------------------
-def run_simulation(custom_acquisitions: list = None) -> dict:
+def run_simulation(custom_acquisitions: list = None, schedule: dict = None,
+                   data: dict = None, analysis: dict = None) -> dict:
     """
     Runs all preset scenarios + optional custom scenario.
 
@@ -413,8 +591,27 @@ def run_simulation(custom_acquisitions: list = None) -> dict:
     now: IL-return timing (the real remaining uncertainty this season)
     and the confirmed real acquisitions (Ward, Dominguez).
 
+    `data`/`analysis`: pass the already-built data_builder/team_analyzer
+    output and this function applies live state (apply_live_state()) and
+    computes the real schedule (compute_schedule_difficulty()) itself --
+    no more need for the caller to manually patch module globals from
+    outside, which is what main.py used to do and what caused real sync
+    bugs this session. If you already have a `schedule` dict computed,
+    pass it directly and it takes priority over auto-computing one.
+
+    `schedule` should be the output of compute_schedule_difficulty(data)
+    -- pass it in (or pass `data` and let this compute it) so every
+    scenario uses the REAL remaining schedule instead of the stale
+    hardcoded fallback (see SCHEDULE's docstring for why that fallback
+    becomes actively wrong, not just imprecise, as the season goes on).
+
     Returns dict of scenario results.
     """
+    if data is not None and analysis is not None:
+        apply_live_state(data, analysis)
+    if schedule is None and data is not None:
+        schedule = compute_schedule_difficulty(data)
+
     print("\n[simulate] Running post-deadline scenarios...")
 
     scenarios = {}
@@ -425,6 +622,7 @@ def run_simulation(custom_acquisitions: list = None) -> dict:
         acquisitions=[],
         il_returns=[],
         include_luck=False,
+        schedule=schedule,
     )
 
     # scenario 1: IL returns only, acquisitions not modeled separately
@@ -435,6 +633,7 @@ def run_simulation(custom_acquisitions: list = None) -> dict:
         acquisitions=[],
         il_returns=None,
         include_luck=True,
+        schedule=schedule,
     )
 
     # scenario 2: IL returns + confirmed deadline acquisitions
@@ -443,6 +642,7 @@ def run_simulation(custom_acquisitions: list = None) -> dict:
         acquisitions=["Taylor Ward", "Seranthony Dominguez"],
         il_returns=None,
         include_luck=True,
+        schedule=schedule,
     )
 
     # scenario 3: worst case - no IL returns land on schedule
@@ -453,6 +653,7 @@ def run_simulation(custom_acquisitions: list = None) -> dict:
                      "J.P. Crawford", "Will Wilson", "Cole Wilcox"],
         include_luck=False,
         use_late_returns=True,
+        schedule=schedule,
     )
 
     # scenario 4: optimistic IL - everyone returns early
@@ -462,6 +663,7 @@ def run_simulation(custom_acquisitions: list = None) -> dict:
         il_returns=None,
         include_luck=True,
         use_early_returns=True,
+        schedule=schedule,
     )
 
     # scenario 5: pessimistic IL - setbacks happen
@@ -471,6 +673,7 @@ def run_simulation(custom_acquisitions: list = None) -> dict:
         il_returns=None,
         include_luck=False,
         use_late_returns=True,
+        schedule=schedule,
     )
 
     # custom scenario
@@ -480,19 +683,70 @@ def run_simulation(custom_acquisitions: list = None) -> dict:
             acquisitions=custom_acquisitions,
             il_returns=None,
             include_luck=True,
+            schedule=schedule,
         )
 
     print(f"[simulate] {len(scenarios)} scenarios complete.")
     return scenarios
 
 
+def compute_rival_projections(data: dict) -> dict:
+    """
+    Projects the other AL West teams' final win totals from their REAL,
+    current pace -- replaces the hardcoded tex_proj/hou_proj/ath_proj
+    constants that used to live here (set once, weeks ago, referencing a
+    Texas record from back near the trade deadline -- "TEX at 47-46").
+    Same staleness problem as the old fixed SCHEDULE dict had: those
+    numbers don't update as the season progresses, so comparisons built
+    on them (e.g. "vs HOU: -1 games") can look far closer than reality
+    once rivals have kept winning while the hardcoded number stood still.
+
+    Uses the same simple pace-extension method as monte_carlo.py's
+    estimate_playoff_cutoff()/estimate_division_leader() -- extends each
+    team's current win% over their own remaining games. Not a full
+    simulation of their remaining schedule, just a live, current
+    estimate instead of a frozen one.
+    """
+    all_teams = data.get("standings", {}).get("all_teams")
+    if all_teams is None or all_teams.empty:
+        print("  [warn] no live standings for rival projections -- "
+              "falling back to stale hardcoded estimates")
+        return {"tex_proj": 83, "hou_proj": 79, "ath_proj": 72}
+
+    def _project(team_name, fallback):
+        row = all_teams[all_teams["Tm"] == team_name]
+        if row.empty:
+            return fallback
+        w = pd.to_numeric(row["W"].values[0], errors="coerce")
+        l = pd.to_numeric(row["L"].values[0], errors="coerce")
+        pct = pd.to_numeric(row["W-L%"].values[0], errors="coerce")
+        if pd.isna(w) or pd.isna(l) or pd.isna(pct):
+            return fallback
+        games_remaining = 162 - w - l
+        return round(w + games_remaining * pct)
+
+    return {
+        "tex_proj": _project("Texas Rangers", 83),
+        "hou_proj": _project("Houston Astros", 79),
+        "ath_proj": _project("Athletics", 72),
+    }
+
+
 # -- division projection -------------------------------------------------------
-def project_division(sea_final_w: int) -> dict:
-    """Project division/playoff outcome based on final wins."""
-    # rough projections for other teams
-    tex_proj = 83   # TEX at 47-46, similar trajectory
-    hou_proj = 79   # HOU fading, 46-49
-    ath_proj = 72   # ATH young team, 41-52
+def project_division(sea_final_w: int, rival_projections: dict = None) -> dict:
+    """Project division/playoff outcome based on final wins.
+
+    `rival_projections` should come from compute_rival_projections(data)
+    -- pass it through from main.py so this uses live current pace
+    instead of the stale fallback constants below."""
+    if rival_projections is None:
+        print("  [warn] project_division() called without live rival "
+              "projections -- using stale hardcoded fallback values")
+        rival_projections = {"tex_proj": 83, "hou_proj": 79, "ath_proj": 72}
+
+    tex_proj = rival_projections.get("tex_proj", 83)
+    hou_proj = rival_projections.get("hou_proj", 79)
+    ath_proj = rival_projections.get("ath_proj", 72)
 
     division_winner = sea_final_w > tex_proj
     wc_position     = None
@@ -522,7 +776,7 @@ def project_division(sea_final_w: int) -> dict:
 
 
 # -- pretty print --------------------------------------------------------------
-def print_simulation(scenarios: dict):
+def print_simulation(scenarios: dict, rival_projections: dict = None):
     print(f"\n{'='*70}")
     print(f"SEATTLE MARINERS - STRETCH RUN SIMULATOR")
     print(f"As of: {CURRENT_DATE}  |  Record: {CURRENT_W}-{CURRENT_L}")
@@ -536,7 +790,7 @@ def print_simulation(scenarios: dict):
     print("  " + "-"*95)
 
     for key, s in scenarios.items():
-        div = project_division(s["final_w"])
+        div = project_division(s["final_w"], rival_projections)
         print(f"  {s['name'][:44]:<45} "
               f"{s['rs_g']:>5.2f} {s['ra_g']:>5.2f} "
               f"{s['win_pct']:>5.3f} {s['proj_wins']:>6} "
@@ -551,7 +805,7 @@ def print_simulation(scenarios: dict):
         print(f"  Projected: {s['final_w']}-{s['final_l']}  "
               f"({s['final_wpct']} win%)")
 
-        div = project_division(s["final_w"])
+        div = project_division(s["final_w"], rival_projections)
         print(f"  Playoff: {div['playoff_position']}")
         print(f"  vs TEX:  {div['gap_to_tex']:+d} games")
         print(f"  vs HOU:  {div['games_ahead_hou']:+d} games")
@@ -573,31 +827,46 @@ def print_simulation(scenarios: dict):
     print(f"  * MEDIUM confidence = 10-15 day IL")
     print(f"  * LOW confidence = 60-day IL, longer recovery")
     print(f"  * RS/G and RA/G impacts estimated from xwOBA differentials")
-    print(f"  * TEX projected ~83W, HOU ~79W based on current trajectory")
+    if rival_projections:
+        print(f"  * TEX projected ~{rival_projections.get('tex_proj','?')}W, "
+              f"HOU ~{rival_projections.get('hou_proj','?')}W "
+              f"(live pace-based estimate, see compute_rival_projections())")
+    else:
+        print(f"  * TEX/HOU rival projections unavailable -- rival_projections "
+              f"was not passed to print_simulation()")
     print(f"{'='*70}\n")
 
 
 # -- test ----------------------------------------------------------------------
 if __name__ == "__main__":
-    # This file's CURRENT_W/CURRENT_L/GAMES_REMAINING/CURRENT_RS_G/RA_G
-    # constants at the top are PLACEHOLDER defaults, not live data.
-    # main.py overrides them with your real current record before calling
-    # run_simulation() -- running this file directly, standalone, skips
-    # that step entirely and silently uses whatever stale numbers happen
-    # to be sitting in this file (they get updated occasionally when this
-    # file itself is edited, but that's not the same as live data).
-    print("\n" + "!" * 70)
-    print("! WARNING: running simulator.py directly, NOT through main.py.")
-    print(f"! Using placeholder record {CURRENT_W}-{CURRENT_L}, NOT your")
-    print("! actual current record. Run `python main.py` instead for a")
-    print("! simulation based on real, live data.")
-    print("!" * 70)
+    # UPDATED 2026-08-26: running this file directly used to silently use
+    # stale placeholder constants (with a loud warning telling you to run
+    # main.py instead). Now it builds live data itself via data_builder/
+    # team_analyzer and applies it the same way main.py does -- standalone
+    # runs are correct by default, no separate "real" entry point needed.
+    print("[standalone] Building live data for a real standalone run...")
+    try:
+        from data_builder import build_all
+        from team_analyzer import analyze_team
 
-    scenarios = run_simulation()
-    print_simulation(scenarios)
+        _data = build_all(2026)
+        _analysis = analyze_team(_data)
 
-    # example custom scenario -- IL returns without Dominguez's modest
-    # impact, isolating just Ward's contribution
-    print("\n-- CUSTOM SCENARIO: Just Ward, no Dominguez --")
-    custom = run_simulation(["Taylor Ward"])
-    print_simulation({"custom": custom["custom"]})
+        scenarios = run_simulation(data=_data, analysis=_analysis)
+        rival_projections = compute_rival_projections(_data)
+        print_simulation(scenarios, rival_projections)
+
+        # example custom scenario -- IL returns without Dominguez's modest
+        # impact, isolating just Ward's contribution
+        print("\n-- CUSTOM SCENARIO: Just Ward, no Dominguez --")
+        custom = run_simulation(["Taylor Ward"], data=_data, analysis=_analysis)
+        print_simulation({"custom": custom["custom"]}, rival_projections)
+
+    except Exception as e:
+        print("\n" + "!" * 70)
+        print(f"! Could not build live data ({e}) -- falling back to")
+        print(f"! placeholder record {CURRENT_W}-{CURRENT_L}. Results below")
+        print("! are NOT based on real data.")
+        print("!" * 70)
+        scenarios = run_simulation()
+        print_simulation(scenarios)

@@ -57,64 +57,16 @@ def main():
 
     # step 5 -- simulation
     print("\nSTEP 5/6 -- Running deadline simulation...")
-    from simulator import run_simulation, print_simulation
-    import simulator as sim_mod
+    from simulator import run_simulation, print_simulation, compute_rival_projections
 
-    # update simulator with live data
-    try:
-        standings = analysis.get("standings", {})
-        record    = standings.get("record")
-        if not record:
-            # standings scrape failed -- use an obviously-fake placeholder
-            # rather than a plausible-looking hardcoded record (e.g. the
-            # old "47-47" default), which could silently pass for real
-            # data if someone doesn't notice the [warn] below.
-            print("  [warn] no live record available -- simulator will "
-                  "use placeholder 0-0, results are not meaningful")
-            record = "0-0"
-        w, l      = map(int, record.split("-"))
-        sim_mod.CURRENT_W       = w
-        sim_mod.CURRENT_L       = l
-        sim_mod.GAMES_REMAINING = 162 - w - l
-        sim_mod.CURRENT_LUCK    = float(standings.get("luck", -2.0) or -2.0)
-        era_rank = analysis.get("pitching", {}).get("team_era_rank")
-        if era_rank:
-            sim_mod.CURRENT_ERA_RANK = era_rank
-
-        # update RS/G from batting overview
-        import pandas as pd
-        ov_bat = data.get("overview", {}).get("batting")
-        if ov_bat is not None and not ov_bat.empty:
-            tm = next((c for c in ["Tm","Team"] if c in ov_bat.columns), None)
-            if tm:
-                sea = ov_bat[ov_bat[tm].str.contains("Seattle", na=False)]
-                if not sea.empty:
-                    r_val = pd.to_numeric(sea["R"].values[0],  errors="coerce")
-                    g_val = pd.to_numeric(sea["G"].values[0],  errors="coerce")
-                    if r_val and g_val and g_val > 0:
-                        sim_mod.CURRENT_RS_G = round(r_val / g_val, 2)
-
-        # update RA/G from pitching overview
-        ov_pit = data.get("overview", {}).get("pitching")
-        if ov_pit is not None and not ov_pit.empty:
-            tm = next((c for c in ["Tm","Team"] if c in ov_pit.columns), None)
-            if tm:
-                sea = ov_pit[ov_pit[tm].str.contains("Seattle", na=False)]
-                if not sea.empty:
-                    for col in ["RA", "R", "RA9"]:
-                        if col in sea.columns:
-                            ra_val = pd.to_numeric(sea[col].values[0], errors="coerce")
-                            g_val  = pd.to_numeric(sea["G"].values[0],  errors="coerce")
-                            if ra_val and g_val and g_val > 0:
-                                sim_mod.CURRENT_RA_G = round(ra_val / g_val, 2)
-                                break
-
-        print(f"  [sim] Record {w}-{l}  RS/G {sim_mod.CURRENT_RS_G}"
-              f"  RA/G {sim_mod.CURRENT_RA_G}  Luck {sim_mod.CURRENT_LUCK}")
-    except Exception as e:
-        print(f"  [warn] could not update simulator: {e}")
-
-    scenarios = run_simulation()
+    # simulator.py now pulls its own live state (record, RS/G, RA/G,
+    # luck, ERA rank, real remaining schedule) internally when given
+    # `data`/`analysis` -- no more manually reaching in and patching its
+    # module attributes from here. That external-patching pattern used
+    # to cause real bugs this session when simulator.py and main.py
+    # drifted out of sync with each other; this removes the possibility
+    # entirely by making simulator.py responsible for its own state.
+    scenarios = run_simulation(data=data, analysis=analysis)
 
     # step 6 -- generate report
     if not args.no_report and not args.print_only:
@@ -129,7 +81,8 @@ def main():
     print_analysis(analysis)
     print_grades(grades)
     print_recommendations(recs)
-    print_simulation(scenarios)
+    rival_projections = compute_rival_projections(data)
+    print_simulation(scenarios, rival_projections)
 
     # summary
     elapsed = round(time.time() - start, 1)

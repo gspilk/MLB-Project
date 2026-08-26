@@ -6,12 +6,14 @@ Scrapes the Mariners schedule + scores page from baseball-reference.com:
 Produces three outputs:
   1. completed  — all games played so far (results, runs, W/L, streak)
   2. next7      — next 7 upcoming games as a checklist
-  3. remaining  — all 104 remaining games after the next 7
+  3. remaining  — all upcoming games AFTER those next 7 (NOT the full
+                 remaining schedule by itself -- see get_schedule()'s
+                 docstring below for why callers need both pieces)
 
 Auto-refreshes at midnight daily via Windows Task Scheduler.
 
 Usage:
-    from schedule_scraper import get_schedule
+    from mariners_schedule_scraper import get_schedule
     completed, next7, remaining = get_schedule(2026)
 """
 
@@ -205,7 +207,14 @@ def print_completed_summary(completed: pd.DataFrame):
 
 
 def get_remaining_by_opponent(remaining: pd.DataFrame) -> pd.DataFrame:
-    """How many games left vs each opponent — useful for SOS analysis."""
+    """How many games left vs each opponent — useful for SOS analysis.
+
+    CAVEAT: pass in the combined next7+remaining schedule if you want
+    a true count -- `remaining` alone excludes the next 7 games (see
+    get_schedule()'s docstring). Not currently called anywhere in the
+    real pipeline, but if you wire this in later, don't repeat the
+    same undercounting bug fixed elsewhere in the project on 2026-08-26.
+    """
     if remaining.empty:
         return pd.DataFrame()
     return (
@@ -234,7 +243,18 @@ def get_schedule(season: int = 2026, force_refresh: bool = False):
     Returns:
         completed   DataFrame — all games played so far
         next7       DataFrame — next 7 upcoming games (checklist)
-        remaining   DataFrame — remaining 104 games after next 7
+        remaining   DataFrame — upcoming games AFTER those next 7
+
+    IMPORTANT for callers: `remaining` alone is NOT the full remaining
+    schedule -- it deliberately excludes the next 7 games (see
+    _split_schedule()). This caused a real bug elsewhere in the project
+    (simulator.py/monte_carlo.py were using `remaining` alone for
+    schedule-difficulty and Monte Carlo calculations, silently missing
+    a quarter of the real remaining games) before it got fixed on
+    2026-08-26. If you need the TRUE full remaining schedule, combine
+    next7 + remaining yourself, e.g.:
+        import pandas as pd
+        full_remaining = pd.concat([next7, remaining], ignore_index=True)
 
     Refreshes daily at midnight when run via Task Scheduler.
     Pass force_refresh=True to bypass cache.
@@ -279,7 +299,7 @@ To run this automatically at midnight every day on Windows:
 4. Trigger: Daily at 12:00 AM
 5. Action: Start a program
    Program: C:/Users/geoff/AppData/Local/Microsoft/WindowsApps/python3.11.exe
-   Arguments: "c:/Users/geoff/OneDrive/Desktop/MLB PROJECT/schedule_scraper.py"
+   Arguments: "c:/Users/geoff/OneDrive/Desktop/MLB PROJECT/mariners_schedule_scraper.py"
 6. Finish
 
 The script will run at midnight, re-fetch the page, update the cache,
