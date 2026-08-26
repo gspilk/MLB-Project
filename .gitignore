@@ -1,0 +1,12 @@
+# Python bytecode -- auto-regenerates every run, never needs tracking
+__pycache__/
+*.pyc
+
+# Scraped input cache -- disposable by design, auto-rebuilds every 24h
+# or on --refresh. NOT the same as data/history.parquet, which stays
+# tracked since it's real accumulated data that can't be re-scraped.
+data/cache/
+
+# Generated Excel reports -- a fresh one builds every run, no need to
+# keep every single day's report in git history
+output/*.xlsx
