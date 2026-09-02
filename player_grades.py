@@ -16,6 +16,8 @@ Usage:
 """
 
 import pandas as pd
+from roster import get_roster_last_names
+from name_matching import last_name_only
 
 # ── thresholds ────────────────────────────────────────────────────────────────
 # batter OPS (primary when xwOBA not available)
@@ -167,6 +169,15 @@ def _get_note(name: str) -> str:
     # notes are generated from data now
     return ""
 
+# UNUSED as of 2026-09-01 -- _batter_action()/_pitcher_action() no longer
+# call these three functions. Kept here (not deleted) only because
+# FRANCHISE_PLAYERS/DFA_CANDIDATES/IL_PLAYERS themselves are still used
+# elsewhere for name-matching (_is_franchise(), _is_dfa(), _is_il()).
+# These specific functions pulled the flavor-text half of those dicts,
+# including a hardcoded contract dollar figure for franchise players
+# that was never based on real scraped data. Removed from the player-
+# facing Action column for exactly that reason -- don't wire these back
+# in without a real data source behind them.
 def _get_franchise_note(name: str) -> str:
     name_parts = name.lower().replace(","," ").split()
     for k, v in FRANCHISE_PLAYERS.items():
@@ -267,69 +278,56 @@ def _grade_era(era: float, xwoba: float = None,
 def _batter_action(name: str, grade: str, luck: float,
                    pa: float, war: float,
                    is_injured: bool = False) -> str:
+    """
+    SIMPLIFIED 2026-09-01: previously returned a full sentence with
+    baked-in reasoning, including a hardcoded CONTRACT DOLLAR FIGURE for
+    franchise players (e.g. "Keep -- 10yr/$210M -- franchise player").
+    This project has never scraped or had access to real contract data
+    anywhere -- that number was invented flavor text, not derived from
+    anything real, sitting next to otherwise genuinely data-driven
+    grades. Simplified to a plain category tag with no fabricated
+    detail: KEEP, DFA, IL, MONITOR, or DEPTH.
+    """
     if _is_franchise(name):
-        return f"Keep — {_get_franchise_note(name)}"
+        return "KEEP"
     if _is_dfa(name):
-        return f"DFA — {_get_dfa_reason(name)}"
+        return "DFA"
     if _is_il(name) or is_injured:
-        return f"IL — evaluate when healthy"
-    if pa and pa < 20:
-        return "Depth piece — insufficient sample"
+        return "IL"
     if pa and pa < 30:
-        return "Monitor — small sample, limited role"
-    if grade == "Elite":
-        return "Keep — core piece"
-    if grade == "Above Average":
-        return "Keep — valuable contributor"
-    if grade == "Average":
-        if luck and luck < -0.030:
-            return "Keep — unlucky, improvement coming"
-        return "Keep — serviceable"
+        return "DEPTH"
+    if grade in ("Elite", "Above Average", "Average"):
+        return "KEEP"
     if grade == "Below Average":
-        if luck and luck < -0.030:
-            return "Monitor — unlucky, give more time"
-        if pa and pa < 60:
-            return "Monitor — small sample"
-        return "Consider replacement"
+        return "MONITOR"
     if grade == "DFA":
-        if pa and pa < 30:
-            return "Depth piece — small sample, not enough to judge"
-        return "DFA — below replacement level"
-    return "Monitor"
+        return "DFA" if not (pa and pa < 30) else "DEPTH"
+    return "MONITOR"
 
 def _pitcher_action(name: str, grade: str,
                     luck: float, era: float, role: str) -> str:
+    """
+    SIMPLIFIED 2026-09-01: previously included several hardcoded, name-
+    matched "special case" overrides (Brash, Munoz, Miller, Castillo,
+    Kirby) that returned fixed opinion text regardless of current real
+    role or performance data -- e.g. Munoz always got "move to setup,
+    Brash to close" even when that wasn't (or was no longer) true, since
+    it was a frozen guess, not read from any live source. Removed those
+    entirely; every player now gets the same plain, data-driven tag
+    based on grade/DFA/AAA status: KEEP, DFA, AAA, or MONITOR.
+    """
     if _is_dfa(name):
-        return f"DFA — {_get_dfa_reason(name)}"
-    for k, v in AAA_CANDIDATES.items():
+        return "DFA"
+    for k in AAA_CANDIDATES:
         if k.lower() in name.lower():
-            return f"Option to AAA — {v}"
-    # specific role overrides
-    if "Brash" in name:
-        return "Promote to closer — 0.60 ERA, elite"
-    if "Muñoz" in name or "Munoz" in name:
-        return "Role change — move to setup, Brash to close"
-    if "Miller" in name and role == "SP":
-        return "Give more starts — xwOBA top 3% MLB"
-    if "Castillo" in name:
-        return "Keep in 6-man — ERA trending down"
-    if "Kirby" in name:
-        return "Monitor — K rate declined, piggyback with Miller"
-    if grade == "Elite":
-        return "Keep — core piece"
-    if grade == "Above Average":
-        return "Keep — valuable"
-    if grade == "Average":
-        if luck and luck > 0.030:
-            return "Keep — unlucky, better than ERA shows"
-        return "Keep — serviceable"
+            return "AAA"
+    if grade in ("Elite", "Above Average", "Average"):
+        return "KEEP"
     if grade == "Below Average":
-        if luck and luck > 0.030:
-            return "Monitor — unlucky, give time"
-        return "Consider replacement"
+        return "MONITOR"
     if grade == "DFA":
-        return "DFA — below replacement level"
-    return "Monitor"
+        return "DFA"
+    return "MONITOR"
 
 
 # ── main grader ───────────────────────────────────────────────────────────────
@@ -354,11 +352,38 @@ def grade_players(data: dict) -> dict:
     pit_luck   = data.get("statcast", {}).get("pit_luck", pd.DataFrame())
     roster_df  = data.get("seattle", {}).get("roster", pd.DataFrame())
 
+    # BUG FIX 2026-09-01: grade_players() used to pull its player list
+    # straight from bbref's season-long team stat pages, which correctly
+    # (and by bbref convention) keep a player's partial-season stat line
+    # even after they've been traded away -- e.g. Luis Castillo still
+    # showed up here with a live "MONITOR" action a full month after
+    # being traded to Chicago on Aug 1, since nothing checked whether he
+    # was still actually on the team. The live 40-man roster (already
+    # scraped and used correctly elsewhere via roster.py) is the real
+    # source of truth for "who's actually still here" -- cross-check
+    # every player against it and skip anyone who's departed, rather
+    # than grading and recommending actions for players who are no
+    # longer on the roster to act on.
+    current_roster = get_roster_last_names(data)
+    if not current_roster:
+        print("  [warn] live roster unavailable -- cannot filter departed "
+              "players, grades may include anyone with any stats this season")
+    departed = []
+
+    def _still_on_roster(name: str) -> bool:
+        if not current_roster:
+            return True  # roster scrape failed -- don't silently drop
+                        # everyone, fail open with a warning instead
+        return last_name_only(name) in current_roster
+
     # ── grade every batter from bbref ──
     if not bat_bbref.empty and "Name" in bat_bbref.columns:
         for _, row in bat_bbref.iterrows():
             name = str(row.get("Name","")).strip()
             if not name or name in ("Name","Tm",""):
+                continue
+            if not _still_on_roster(name):
+                departed.append(name)
                 continue
 
             # core stats from bbref
@@ -453,6 +478,9 @@ def grade_players(data: dict) -> dict:
         for _, row in pit_bbref.iterrows():
             name = str(row.get("Name","")).strip()
             if not name or name in ("Name","Tm",""):
+                continue
+            if not _still_on_roster(name):
+                departed.append(name)
                 continue
 
             # core stats
@@ -583,7 +611,39 @@ def grade_players(data: dict) -> dict:
 
     print(f"[grade] {len(batter_grades)} batters, "
           f"{len(pitcher_grades)} pitchers graded.")
+    if departed:
+        print(f"  [grade] excluded {len(departed)} player(s) no longer on "
+              f"the live roster (traded/DFA'd/released): {', '.join(departed)}")
+
+    # SEPARATE, NEW as of 2026-09-01: some 40-man roster players have
+    # never actually appeared in a game this season (never called up,
+    # or a recent minor-league addition) -- bbref's season stat
+    # leaderboards only include players with real accumulated PA/IP, so
+    # these players never got a row to grade at all. They're neither
+    # "departed" (they're still on the roster) nor gradeable (no stats
+    # exist yet). Rather than silently vanishing from the report, list
+    # them plainly. Not classified as batter/pitcher since the roster
+    # scrape has no clean position field -- guessing that would risk
+    # exactly the kind of wrong-category mistake this project has spent
+    # a lot of effort fixing elsewhere.
+    graded_last_names = {last_name_only(p["name"]) for p in batter_grades + pitcher_grades}
+    departed_last_names = {last_name_only(n) for n in departed}
+    no_action_players = []
+    if not roster_df.empty and "Name" in roster_df.columns:
+        for _, row in roster_df.iterrows():
+            rname = str(row.get("Name", "")).strip()
+            if not rname:
+                continue
+            rlast = last_name_only(rname)
+            if rlast not in graded_last_names and rlast not in departed_last_names:
+                no_action_players.append(rname)
+
+    if no_action_players:
+        print(f"  [grade] {len(no_action_players)} roster player(s) with no "
+              f"MLB action yet this season: {', '.join(no_action_players)}")
+
     return {"batters": batter_grades, "pitchers": pitcher_grades,
+            "no_mlb_action": no_action_players,
             "summary": summary}
 
 
@@ -612,10 +672,13 @@ def print_grades(grades: dict):
         xw    = f"{g['xwOBA']:.3f}" if g["xwOBA"] else "  N/A"
         luck  = f"{g['luck']:+.3f}" if g["luck"]  else "   N/A"
         war   = f"{g['WAR']:>4.1f}" if g["WAR"]   else " N/A"
-        note  = f"  [{g['note']}]"  if g["note"]  else ""
+        # note field intentionally not appended here anymore -- every
+        # number it restated (HR, WAR, xwOBA gap) is already visible in
+        # its own column on this same row, so the extra prose was pure
+        # redundancy on top of what the user wanted as a plain tag
         print(f"{g['name']:<28} {g['grade']:<25} {g['PA']:>4} "
               f"{ops:>5} {xw:>6} {luck:>6} {g['HR']:>3} {war:>4}  "
-              f"{g['action']}{note}")
+              f"{g['action']}")
 
     # ── pitchers ──
     print(f"\n── PITCHERS ({len(grades['pitchers'])}) ──")
@@ -631,10 +694,9 @@ def print_grades(grades: dict):
         xw    = f"{g['xwOBA_against']:.3f}" if g["xwOBA_against"] else "  N/A"
         luck  = f"{g['luck']:+.3f}"         if g["luck"]          else "   N/A"
         war   = f"{g['WAR']:>4.1f}"         if g["WAR"]           else " N/A"
-        note  = f"  [{g['note']}]"          if g["note"]          else ""
         print(f"{g['name']:<28} {g['role']:<3} {g['grade']:<20} "
               f"{g['IP']:>5} {era:>5} {whip:>5} {k9:>4} {xw:>6} "
-              f"{luck:>6} {war:>4}  {g['action']}{note}")
+              f"{luck:>6} {war:>4}  {g['action']}")
 
     # ── summary ──
     s = grades["summary"]

@@ -195,6 +195,45 @@ def _team_diagnosis(analysis):
 
 
 # ── section 2 ────────────────────────────────────────────────────────────────
+def _position_has_il_player(data, pos_code):
+    """
+    Checks whether the player(s) at a given batting position are
+    CURRENTLY on IL, using bbref's own live annotation on the Name
+    field (e.g. "Brendan Donovan (7-day IL)") -- same trusted, live
+    source used throughout this project. Replaces a hardcoded, frozen
+    position set that used to assume a fixed list of positions
+    (C/3B/SS/DH/RP) always had an IL return pending, regardless of
+    whether that was still true. Returns (bool, player_name_or_None).
+    """
+    bat = data.get("seattle", {}).get("batting")
+    if bat is None or bat.empty or "Pos" not in bat.columns:
+        return False, None
+    matches = bat[bat["Pos"] == pos_code]
+    for _, row in matches.iterrows():
+        name = str(row.get("Name", ""))
+        if "IL" in name:
+            return True, name
+    return False, None
+
+
+def _pitching_role_has_il_player(data, role_prefix):
+    """Same idea as _position_has_il_player() but for SP/RP, using the
+    pitching table's GS count to distinguish starters from relievers
+    since there's no direct Pos column for pitching role."""
+    pit = data.get("seattle", {}).get("pitching")
+    if pit is None or pit.empty:
+        return False, None
+    for _, row in pit.iterrows():
+        name = str(row.get("Name", ""))
+        if "IL" not in name:
+            continue
+        gs = pd.to_numeric(row.get("GS", 0), errors="coerce") or 0
+        is_sp = gs >= 3
+        if (role_prefix == "SP" and is_sp) or (role_prefix == "RP" and not is_sp):
+            return True, name
+    return False, None
+
+
 def _stats_to_improve(data):
     targets = []
 
@@ -204,6 +243,7 @@ def _stats_to_improve(data):
         for stat in ["R","H","HR","RBI","BA","OBP","SLG","OPS","OPS+","BB"]:
             val, rank, total = _sea_rank(bat, stat, tm_col)
             if rank and total and rank > 15:
+                is_internal = stat in {"OBP","BB","SS","C","3B"}
                 targets.append({
                     "category": "Offense",
                     "stat":     stat,
@@ -211,8 +251,8 @@ def _stats_to_improve(data):
                     "rank":     rank,
                     "total":    total,
                     "priority": "HIGH" if rank > 20 else "MONITOR",
-                    "fix":      _batting_fix(stat),
-                    "internal": stat in {"OBP","BB","SS","C","3B"},
+                    "fix":      _batting_fix(stat, is_internal),
+                    "internal": is_internal,
                 })
 
     pit = _safe(data, "overview", "pitching")
@@ -228,7 +268,7 @@ def _stats_to_improve(data):
                     "rank":     rank,
                     "total":    total,
                     "priority": "HIGH" if rank > 20 else "MONITOR",
-                    "fix":      _pitching_fix(stat),
+                    "fix":      _pitching_fix(stat, True),
                     "internal": True,
                 })
 
@@ -245,7 +285,7 @@ def _stats_to_improve(data):
                     "rank":     rank,
                     "total":    total,
                     "priority": "HIGH" if rank > 20 else "MONITOR",
-                    "fix":      _fielding_fix(stat),
+                    "fix":      _fielding_fix(stat, True),
                     "internal": True,
                 })
 
@@ -264,6 +304,20 @@ def _stats_to_improve(data):
             pos_rank = int((all_wars > wv).sum()) + 1
             total    = len(all_wars)
             if pos_rank > 15:
+                if pos in ("1B","C","DH","SS","3B","RF"):
+                    is_internal, il_name = _position_has_il_player(data, pos)
+                elif pos in ("SP","RP"):
+                    is_internal, il_name = _pitching_role_has_il_player(data, pos)
+                else:
+                    is_internal, il_name = False, None
+
+                if is_internal and il_name:
+                    fix_text = f"INTERNAL — awaiting return: {il_name}"
+                elif is_internal:
+                    fix_text = "INTERNAL"
+                else:
+                    fix_text = "EXTERNAL — no IL return pending"
+
                 targets.append({
                     "category": "WAR by Position",
                     "stat":     f"{pos} WAR",
@@ -271,59 +325,38 @@ def _stats_to_improve(data):
                     "rank":     pos_rank,
                     "total":    total,
                     "priority": "HIGH" if pos_rank > 20 else "MONITOR",
-                    "fix":      _war_fix(pos),
-                    "internal": pos in {"C","3B","SS","DH","RP"},
+                    "fix":      fix_text,
+                    "internal": is_internal,
                 })
 
     targets.sort(key=lambda x: (0 if x["priority"]=="HIGH" else 1, x["rank"]))
     return targets
 
 
-def _batting_fix(stat):
-    return {
-        "R":   "Donovan + Raleigh returning — run production will improve",
-        "H":   "Contact rate improving — Crawford return helps",
-        "HR":  "Power is fine — high K rate suppressing batting avg",
-        "RBI": "RISP production improves with Donovan + Raleigh returning",
-        "BA":  "Three true outcomes team — by design, power offsets BA",
-        "OBP": "Crawford 14.7 BB% returning — OBP will jump immediately",
-        "SLG": "Raley 19.2 Barrel% + Raleigh power returning — SLG improving",
-        "OPS": "Full health lineup projects top 5 AL — internal fix available",
-        "OPS+":"Improving with IL returns — no external move needed",
-        "BB":  "Crawford elite walk rate returning — fixes this immediately",
-    }.get(stat, f"Monitor {stat}")
+def _batting_fix(stat, internal):
+    """
+    SIMPLIFIED 2026-09-01: previously returned a full hardcoded sentence
+    per stat (e.g. "Crawford 14.7 BB% returning -- OBP will jump
+    immediately"), frozen from whenever this was written. Several had
+    already gone stale/wrong -- Crawford and Raleigh are both confirmed
+    ACTIVE (not on IL) as of this report, yet the old text for OBP/BB/C/
+    SS/3B all assumed they were still out. Simplified to match the
+    existing internal/external tag already computed above, rather than
+    a sentence that can silently drift out of sync with real IL status.
+    """
+    return "INTERNAL" if internal else "EXTERNAL"
 
 
-def _pitching_fix(stat):
-    return {
-        "ERA":  "Already top 5 MLB — elite staff",
-        "WHIP": "Castillo + Muñoz driving this up — role changes help",
-        "BB":   "Muñoz walk rate — role change to setup reduces exposure",
-        "HR":   "Muñoz Barrel% elevated — role change helps significantly",
-        "FIP":  "xwOBA suggests ERA will come down — regression coming",
-        "ERA+": "Already top 5 MLB — above average",
-    }.get(stat, f"Monitor {stat}")
+def _pitching_fix(stat, internal):
+    return "INTERNAL" if internal else "EXTERNAL"
 
 
-def _fielding_fix(stat):
-    return {
-        "Rtot":   "Naylor -0.7 DWAR at 1B — biggest defensive hole on roster",
-        "DefEff": "Outfield defense solid — Robles return improves range",
-        "E":      "Error rate acceptable — Crawford return stabilizes SS",
-    }.get(stat, "Monitor")
+def _fielding_fix(stat, internal):
+    return "INTERNAL" if internal else "EXTERNAL"
 
 
-def _war_fix(pos):
-    return {
-        "1B":  "Naylor below average — potential deadline upgrade target",
-        "C":   "Raleigh returns from IL — fixes this immediately",
-        "DH":  "Emerson/Canzone rotation — internal fix available",
-        "SS":  "Crawford returns from IL — .354 xwOBA, elite OBP",
-        "3B":  "Donovan returns from IL — .839 OPS when healthy",
-        "RF":  "Raley + Canzone solid — Refsnyder/Robles dragged WAR down",
-        "SP":  "Miller + Hancock + Woo elite — Kirby needs to bounce back",
-        "RP":  "Brash returns — bullpen immediately becomes elite",
-    }.get(pos, f"Monitor {pos} WAR")
+def _war_fix(pos, internal):
+    return "INTERNAL" if internal else "EXTERNAL"
 
 
 # ── section 3 ────────────────────────────────────────────────────────────────
@@ -799,33 +832,36 @@ def _season_outlook(analysis, data):
     st = analysis.get("standings", {})
     sc = analysis.get("schedule", {})
     pw = o.get("projected_wins", 88)
+
+    div_rank      = st.get("div_rank")
+    mlb_rank      = st.get("mlb_rank")
+    wc_games_back = st.get("wc_games_back")
+    wc_in_reach   = st.get("wc_in_reach")
+
+    if div_rank is not None:
+        division_text = f"{div_rank}{'st' if div_rank==1 else 'nd' if div_rank==2 else 'rd' if div_rank==3 else 'th'} place AL West"
+        if mlb_rank is not None:
+            division_text += f" (#{mlb_rank}/30 in MLB)"
+    else:
+        division_text = "Division rank unavailable"
+
+    if wc_games_back is not None:
+        if wc_games_back <= 0:
+            playoff_path_text = "Currently holding a Wild Card spot"
+        else:
+            playoff_path_text = (f"Wild Card {'in reach' if wc_in_reach else 'a stretch'} "
+                                 f"— {wc_games_back:.1f} games back")
+    else:
+        playoff_path_text = "Wild Card gap unavailable"
+
     return {
         "current_record": st.get("record"),
         "projected_wins": pw,
         "floor":          o.get("floor"),
         "ceiling":        o.get("ceiling"),
         "most_likely":    f"{pw}—{(pw or 88)+2} wins",
-        "division":       "AL West leaders — favorable division",
-        "playoff_path":   "AL West title → avoid TB/NYY until ALCS",
-        "key_factors": [
-            "Donovan + Raleigh + Crawford return from IL",
-            "Brash takes over closer role immediately",
-            "Miller gets full-time rotation spot",
-            "Kirby bounces back or piggyback with Miller",
-            f"Luck correction — {st.get('luck',0)} luck = free wins coming",
-            f"Favorable schedule — {sc.get('easy_games',0)} games vs sub-.500 teams",
-            "Gilbert emerging as legitimate #3 starter — 3.29 ERA, 2.1 WAR",
-        ],
-        "risks": [
-            "Kirby sustained decline — K rate dropped, not just a slump",
-            "Muñoz curveball command doesn't improve in setup role",
-            "Injury to Hancock, Woo, or Miller",
-            "Offense stalls without Donovan/Raleigh returning healthy",
-            "1B hole — Naylor below average, no internal fix",
-        ],
-        "october_outlook": "Dangerous in short series — "
-                          "Miller + Woo + Hancock + Gilbert + Brash + Ferrer "
-                          "= can beat anyone in 5 games",
+        "division":       division_text,
+        "playoff_path":   playoff_path_text,
     }
 
 
@@ -893,10 +929,11 @@ def print_recommendations(recs):
             print(f"    {s['category']:<14} {s['stat']:<10} "
                   f"rank {s['rank']:>2}/{s['total']}  {s['value']}")
 
-    print(f"\n── IMMEDIATE ROSTER MOVES ──")
-    for m in im:
-        print(f"  [{m['urgency']:<10}] {m['type']:<12} {m['player']}")
-        print(f"                   → {m['reason']}")
+    # IMMEDIATE ROSTER MOVES section REMOVED 2026-09-01 -- see
+    # generate_report()'s docstring note in output_report.py for why
+    # (deadline-specific content gone stale/wrong a month past the
+    # actual Aug 3 deadline). recs["immediate_moves"] is still computed,
+    # just no longer printed here.
 
     print(f"\n── OPTIMAL LINEUP (by xwOBA, active only) ──")
     for i, p in enumerate(lu.get("optimal_order",[])[:9], 1):
@@ -946,39 +983,19 @@ def print_recommendations(recs):
                   f"{str(p.get('IP','?')):>5} {era:>5} "
                   f"{str(p['xwOBA_against']):>9}")
 
-    print(f"\n── DEADLINE STRATEGY ──")
-    print(f"  {dl['strategy']}")
-    print(f"\n  NEEDS:")
-    for n in dl["needs"]:
-        print(f"    → {n}")
-    print(f"\n  TARGET PROFILES:")
-    for t in dl["targets"]:
-        print(f"    Position:  {t['position']}")
-        print(f"    Profile:   {t['profile']}")
-        print(f"    Cost:      {t['cost']}")
-        print(f"    Why:       {t['why']}")
-        print()
-    print(f"  DO NOT TRADE:")
-    for p in dl["do_not_trade"]:
-        print(f"    ✗ {p}")
-    if dl.get("sell"):
-        print(f"\n  SELL CANDIDATES:")
-        for s in dl["sell"]:
-            print(f"    → {s['player']}: {s['reason']}")
-            print(f"      Note: {s['note']}")
+    # DEADLINE STRATEGY section REMOVED 2026-09-01 -- same reasoning as
+    # the IMMEDIATE ROSTER MOVES removal above. This section had gone
+    # from stale to actively wrong: it was still listing Luis Castillo
+    # as a "sell candidate" over a month after he was actually traded
+    # away, plus hardcoded contract figures in DO NOT TRADE that were
+    # never real scraped data. recs["deadline"] is still computed by
+    # _deadline_moves(), just no longer printed here.
 
     print(f"\n── SEASON OUTLOOK ──")
     print(f"  Record now:   {ou['current_record']}")
     print(f"  Most likely:  {ou['most_likely']}")
     print(f"  Floor/Ceiling:{ou['floor']}—{ou['ceiling']} wins")
     print(f"  Playoff path: {ou['playoff_path']}")
-    print(f"  October:      {ou['october_outlook']}")
-    print(f"\n  Key factors:")
-    for f in ou["key_factors"]:
-        print(f"    ✓ {f}")
-    print(f"\n  Risks:")
-    for r in ou["risks"]:
-        print(f"    ⚠ {r}")
     print(f"\n{'='*65}\n")
 
 

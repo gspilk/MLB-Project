@@ -116,7 +116,7 @@ def _grade_color(grade: str) -> str:
 
 
 # ── sheet 1: team summary ─────────────────────────────────────────────────────
-def _sheet_summary(wb: Workbook, d: dict, ou: dict):
+def _sheet_summary(wb: Workbook, d: dict, ou: dict, data: dict = None):
     ws = wb.create_sheet("Team Summary")
     ws.sheet_view.showGridLines = False
     _set_col_widths(ws, [22, 18, 18, 18, 18, 18, 18, 18])
@@ -190,7 +190,6 @@ def _sheet_summary(wb: Workbook, d: dict, ou: dict):
         ("Ceiling",       f"{ou.get('ceiling')} wins"),
         ("Division",      ou.get("division")),
         ("Playoff path",  ou.get("playoff_path")),
-        ("October",       ou.get("october_outlook")),
     ]
     for label, val in outlook_rows:
         _cell(ws, r, 1, label, bold=True)
@@ -203,30 +202,108 @@ def _sheet_summary(wb: Workbook, d: dict, ou: dict):
         r += 1
     r += 1
 
-    # key factors
-    _subtitle(ws, r, "KEY FACTORS", 8)
-    r += 1
-    for f in ou.get("key_factors", []):
-        ws.merge_cells(start_row=r, start_column=1,
-                       end_row=r, end_column=8)
-        c = ws.cell(row=r, column=1, value=f"✓  {f}")
-        c.font      = Font(name="Arial", size=10)
-        c.fill      = PatternFill("solid", start_color=GREEN)
-        c.alignment = Alignment(indent=1)
-        r += 1
-    r += 1
+    # KEY FACTORS and RISKS sections REMOVED 2026-09-01 -- both were
+    # entirely hardcoded sentence lists (see recommender.py's
+    # _season_outlook()), frozen from earlier in the season, and had
+    # since gone actively wrong (not just stale) -- claiming IL returns
+    # for players confirmed active, a bullpen role change already
+    # debunked elsewhere in this project, etc. Removed per instruction
+    # to stop using custom/invented commentary and rely on the real
+    # stats already shown elsewhere in this report instead.
 
-    # risks
-    _subtitle(ws, r, "RISKS", 8, bg="8B0000")
+    if data is not None:
+        _add_game_results_chart(wb, ws, r, data)
+
+
+def _add_game_results_chart(wb: Workbook, ws, start_row: int, data: dict) -> None:
+    """
+    Embeds a real, native Excel line chart showing cumulative win%
+    (games 1 through N on the x-axis, running win% 0-1 on the y-axis)
+    across the season so far.
+
+    Uses data["schedule"]["completed"] rather than the accumulated
+    history.parquet snapshots used in an earlier version of this chart.
+    That matters: history.parquet only has a row for whenever main.py
+    happened to be run, which can have real gaps if it wasn't run every
+    day. The completed game log has NO gaps -- every game actually
+    played shows up, regardless of how often this report gets
+    generated, so the trend it shows is always complete and accurate.
+    """
+    from openpyxl.chart import LineChart, Reference
+
+    completed = data.get("schedule", {}).get("completed")
+    if completed is None or completed.empty:
+        return
+    if not all(c in completed.columns for c in ["W/L", "Date"]):
+        return
+
+    df = completed.copy()
+    df = df.dropna(subset=["W/L"])
+    if df.empty:
+        return
+
+    is_win = df["W/L"].astype(str).str.startswith("W")
+    cum_wins = is_win.cumsum()
+    game_num = range(1, len(df) + 1)
+    cum_win_pct = [w / g for w, g in zip(cum_wins, game_num)]
+
+    r = start_row
+    _subtitle(ws, r, "SEASON TREND — CUMULATIVE WIN %", 8)
     r += 1
-    for risk in ou.get("risks", []):
-        ws.merge_cells(start_row=r, start_column=1,
-                       end_row=r, end_column=8)
-        c = ws.cell(row=r, column=1, value=f"⚠  {risk}")
-        c.font      = Font(name="Arial", size=10)
-        c.fill      = PatternFill("solid", start_color=RED)
-        c.alignment = Alignment(indent=1)
+    ws.cell(row=r, column=1, value="Game #")
+    ws.cell(row=r, column=2, value="Win %")
+    data_start_row = r + 1
+    for i, pct in zip(game_num, cum_win_pct):
         r += 1
+        ws.cell(row=r, column=1, value=i)
+        ws.cell(row=r, column=2, value=round(pct, 4))
+    data_end_row = r
+
+    chart = LineChart()
+    chart.title = "Cumulative Win % Over the Season"
+    chart.style = 2
+    chart.varyColors = False  # this was the real bug (confirmed in real
+                              # Excel, not just a previewer artifact) --
+                              # style 2 defaults to "vary colors by
+                              # point," which cycles a line chart's
+                              # color segment-by-segment across the
+                              # theme palette instead of keeping one
+                              # consistent color for the single series,
+                              # producing what looked like several
+                              # overlapping different-colored lines
+    chart.y_axis.title = "Win %"
+    chart.x_axis.title = "Game #"
+    chart.y_axis.scaling.min = 0
+    chart.y_axis.scaling.max = 1
+    chart.height = 8
+    chart.width = 20
+    chart.legend = None
+
+    # explicitly force axis lines, tick marks, and tick labels ON
+    for axis in (chart.x_axis, chart.y_axis):
+        axis.delete = False
+        axis.majorTickMark = "out"
+        axis.tickLblPos = "nextTo"
+    # avoid an unreadable wall of 135 game-number labels crammed onto
+    # the x-axis -- show one roughly every 10 games instead
+    chart.x_axis.tickLblSkip = 10
+    chart.x_axis.tickMarkSkip = 10
+
+    values = Reference(ws, min_col=2, min_row=data_start_row - 1, max_row=data_end_row)
+    chart.add_data(values, titles_from_data=True)
+    categories = Reference(ws, min_col=1, min_row=data_start_row, max_row=data_end_row)
+    chart.set_categories(categories)
+
+    # belt-and-suspenders on top of varyColors=False above -- explicitly
+    # pin the single series to one solid color so there's no ambiguity
+    # left for Excel to fill in on its own
+    chart.series[0].graphicalProperties.line.solidFill = "1F77B4"
+    chart.series[0].graphicalProperties.line.width = 20000  # EMUs, ~1.5pt
+
+    anchor_col = get_column_letter(3)
+    ws.add_chart(chart, f"{anchor_col}{start_row}")
+
+
 
 
 # ── sheet 2: player grades ────────────────────────────────────────────────────
@@ -629,11 +706,19 @@ def _sheet_targets(wb: Workbook, targets: dict):
         r += 1
 
 # ── sheet: simulation ─────────────────────────────────────────────────────────
-def _sheet_simulation(wb, scenarios: dict):
-    from simulator import project_division
+def _sheet_simulation(wb, scenarios: dict, data: dict = None):
+    from simulator import project_division, compute_rival_projections
     ws = wb.create_sheet("Deadline Simulation")
     ws.sheet_view.showGridLines = False
     _set_col_widths(ws, [48, 7, 7, 7, 8, 10, 25])
+
+    # BUG FIX 2026-09-01: this sheet builder was calling project_division()
+    # with no rival_projections argument at all, silently falling back to
+    # stale hardcoded TEX/HOU estimates every single run (12 warnings per
+    # report) even though live rival projections were already correctly
+    # wired into main.py's console output. Compute the same live values
+    # here too instead of accepting the stale fallback by default.
+    rival_projections = compute_rival_projections(data) if data is not None else None
 
     r = 1
     _title(ws, r, "DEADLINE ACQUISITION SIMULATOR", 7)
@@ -656,7 +741,7 @@ def _sheet_simulation(wb, scenarios: dict):
     }
 
     for key, s in scenarios.items():
-        div   = project_division(s["final_w"])
+        div   = project_division(s["final_w"], rival_projections)
         pos   = div["playoff_position"]
         color = next((v for k, v in PLAYOFF_COLORS.items()
                       if k in pos.lower()), LGRAY)
@@ -673,7 +758,7 @@ def _sheet_simulation(wb, scenarios: dict):
 
     # detail each scenario
     for key, s in scenarios.items():
-        div = project_division(s["final_w"])
+        div = project_division(s["final_w"], rival_projections)
         _subtitle(ws, r, s["name"].upper(), 7, bg=TEAL)
         r += 1
 
@@ -782,18 +867,26 @@ def generate_report(data: dict, analysis: dict,
     d  = recs["diagnosis"]
     ou = recs["outlook"]
     si = recs["stats_to_improve"]
-    im = recs["immediate_moves"]
-    dl = recs["deadline"]
 
-    _sheet_summary(wb, d, ou)
+    # REMOVED 2026-09-01: "Roster Moves" sheet (immediate moves + deadline
+    # strategy + DO NOT TRADE + SELL CANDIDATES) taken out entirely. It's
+    # now a month past the real Aug 3 trade deadline, and this section had
+    # gone from just stale to actively wrong -- e.g. still listing Luis
+    # Castillo as a "sell candidate" over a month after he was actually
+    # traded away, plus hardcoded contract figures in DO NOT TRADE that
+    # were never real data to begin with (same issue already fixed
+    # elsewhere in player_grades.py). recs["immediate_moves"] and
+    # recs["deadline"] are still computed by recommender.py in case
+    # something else needs them later, just no longer rendered here.
+
+    _sheet_summary(wb, d, ou, data)
     _sheet_grades(wb, grades)
     _sheet_statcast(wb, data)
     _sheet_stats(wb, si)
-    _sheet_moves(wb, im, dl)
     _sheet_targets(wb, recs.get("player_targets", {}))
     _sheet_schedule(wb, data)
     if scenarios:
-        _sheet_simulation(wb, scenarios)
+        _sheet_simulation(wb, scenarios, data)
 
     wb.save(path)
     print(f"[report] Saved: {path}")

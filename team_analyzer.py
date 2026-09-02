@@ -341,6 +341,7 @@ def analyze_standings(data: dict) -> dict:
         "div_rank":     None,
         "mlb_rank":     None,
         "wc_gap":       None,
+        "wc_games_back": None,
         "wc_in_reach":  None,
         "luck":         None,
         "pythag_wl":    None,
@@ -355,10 +356,11 @@ def analyze_standings(data: dict) -> dict:
 
     ctx = _safe_get(data, "standings", "mariners")
     if ctx:
-        result["div_rank"]    = ctx.get("div_rank")
-        result["mlb_rank"]    = ctx.get("mlb_rank")
-        result["wc_gap"]      = ctx.get("wc_gap")
-        result["wc_in_reach"] = ctx.get("wc_in_reach")
+        result["div_rank"]      = ctx.get("div_rank")
+        result["mlb_rank"]      = ctx.get("mlb_rank")
+        result["wc_gap"]        = ctx.get("wc_gap")
+        result["wc_games_back"] = ctx.get("wc_games_back")
+        result["wc_in_reach"]   = ctx.get("wc_in_reach")
 
         row = ctx.get("expanded_row")
         if row is not None and not row.empty:

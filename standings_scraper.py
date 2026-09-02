@@ -204,12 +204,28 @@ def get_mariners_context(division_tables: dict, expanded_df) -> dict:
     sea_pct   = float(sea_row["W-L%"].values[0]) if not sea_row.empty else None
     wc_gap    = round(sea_pct - wc_cutoff, 3) if sea_pct and wc_cutoff else None
 
+    # BUG FIX 2026-09-01: wc_gap above is a WIN% differential (e.g.
+    # -0.03), not a games-back count -- it was being displayed
+    # elsewhere in the report as "X.X games", which is wrong by a wide
+    # margin (a real user caught this: -0.03 displayed as "0.0 games"
+    # when the real gap is 4.0 games). bbref's own playoff-picture table
+    # already has a real, correct "GB" column -- use that directly
+    # instead of a derived approximation.
+    wc_games_back = None
+    if not sea_row.empty and "GB" in sea_row.columns:
+        gb_val = sea_row["GB"].values[0]
+        wc_games_back = 0.0 if str(gb_val).strip() == "--" else \
+                        pd.to_numeric(gb_val, errors="coerce")
+
     return {
-        "mlb_rank":     mlb_rank,
-        "div_rank":     div_rank,
-        "wc_gap":       wc_gap,
-        "wc_in_reach":  wc_gap is not None and wc_gap > -0.060,
-        "expanded_row": get_team_row(expanded_df, "Seattle Mariners"),
+        "mlb_rank":      mlb_rank,
+        "div_rank":      div_rank,
+        "wc_gap":        wc_gap,          # win% differential -- kept for
+                                          # anything already relying on it
+        "wc_games_back": wc_games_back,   # REAL games back, use this for
+                                          # any "X games back" display text
+        "wc_in_reach":   wc_gap is not None and wc_gap > -0.060,
+        "expanded_row":  get_team_row(expanded_df, "Seattle Mariners"),
     }
 
 
