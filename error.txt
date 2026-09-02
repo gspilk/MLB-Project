@@ -1,0 +1,137 @@
+PS C:\Users\geoff\OneDrive\Desktop\MLB PROJECT> python main.py --refresh
+
+=================================================================
+  SEATTLE MARINERS MIDSEASON ANALYZER
+  2026-09-01
+  Data source: Baseball Reference (bbref.com)
+  Note: bbref updates 6-24 hours after games
+=================================================================
+
+STEP 1/6 -- Building data...
+
+==================================================
+Building MLB data for 2026 season...
+==================================================
+
+[build] standings ...
+[fetch] standings 2026 ...
+  [GET] https://www.baseball-reference.com/leagues/majors/2026-standings.shtml
+  [ok]   AL_East: 5 teams
+  [ok]   AL_Central: 5 teams
+  [ok]   AL_West: 5 teams
+  [ok]   NL_East: 5 teams
+  [ok]   NL_Central: 5 teams
+  [ok]   NL_West: 5 teams
+  [ok]   expanded standings: 30 teams, 28 cols
+[build] schedule ...
+[fetch] schedule 2026 ...
+  [GET] https://www.baseball-reference.com/teams/SEA/2026-schedule-scores.shtml
+  [ok]   schedule: 162 total games
+  [ok]   completed: 138 games
+  [ok]   next 7:    7 games
+  [ok]   remaining: 17 games
+[build] seattle stats ...
+[fetch] seattle stats 2026 from bbref ...
+  [GET] https://www.baseball-reference.com/teams/SEA/2026.shtml
+  [ok]   batting: 26 players, 33 cols
+  [ok]   pitching: 28 players, 36 cols
+  [ok]   fielding: 52 players, 29 cols
+  [ok]   value batting: 26 players, 21 cols
+  [ok]   value pitching: 28 players, 23 cols
+  [ok]   40-man roster: 44 players, 14 cols
+[build] batting leaders ...
+[fetch] batting leaders 2026 ...
+  [GET] https://www.baseball-reference.com/leagues/AL/2026-standard-batting.shtml
+  [ok]   AL batting teams:   15 teams
+  [ok]   AL batting players: 413 players
+  [GET] https://www.baseball-reference.com/leagues/NL/2026-standard-batting.shtml
+  [ok]   NL batting teams:   15 teams
+  [ok]   NL batting players: 405 players
+[build] pitching leaders ...
+[fetch] pitching leaders 2026 ...
+  [GET] https://www.baseball-reference.com/leagues/AL/2026-standard-pitching.shtml
+  [ok]   AL pitching teams:   15 teams
+  [ok]   AL pitching players: 496 players
+  [GET] https://www.baseball-reference.com/leagues/NL/2026-standard-pitching.shtml
+  [ok]   NL pitching teams:   15 teams
+  [ok]   NL pitching players: 509 players
+[build] MLB overview ...
+[fetch] MLB overview 2026 ...
+  [GET] https://www.baseball-reference.com/leagues/majors/2026.shtml
+  [ok]   batting: 30 teams, 29 cols
+  [ok]   pitching: 30 teams, 36 cols
+  [ok]   fielding: 30 teams, 19 cols
+  [ok]   WAR by position: 30 rows, 33 cols
+[build] live roster: 44 players
+[build] statcast ...
+[load] statcast batters ...
+  [ok]  504 batters, 15 cols
+[load] statcast pitchers ...
+  [ok]  639 pitchers, 15 cols
+
+==================================================
+All data built in 34.6s
+==================================================
+
+
+STEP 2/6 -- Analyzing team...
+
+[analyze] Running team analysis...
+[analyze] Done.
+
+STEP 3/6 -- Grading players...
+
+[grade] Grading ALL Mariners players...
+[grade] 26 batters, 28 pitchers graded.
+
+STEP 4/6 -- Generating recommendations...
+
+[recommend] Generating recommendations...
+  [targets] filtering batters to positions the team actually needs: ['2', '3', 'D']
+  [targets] 10 teams flagged as likely sellers based on live standings
+  [targets] 10 batter targets found
+  [debug] pitcher merge cols with team: ['Name', 'Tm']
+  [targets] 10 pitcher targets found
+[recommend] Done.
+
+STEP 5/6 -- Running deadline simulation...
+  [sim] Live state applied: 64-74  RS/G 3.9  RA/G 4.43  Luck 3.0
+  [schedule] 24 remaining games classified: 17 easy, 0 hard, 7 neutral (live opponent records)
+
+[simulate] Running post-deadline scenarios...
+[simulate] 6 scenarios complete.
+
+STEP 6/6 -- Generating Excel report...
+
+[report] Generating Excel report...
+  [warn] project_division() called without live rival projections -- using stale hardcoded fallback values
+  [warn] project_division() called without live rival projections -- using stale hardcoded fallback values
+  [warn] project_division() called without live rival projections -- using stale hardcoded fallback values
+  [warn] project_division() called without live rival projections -- using stale hardcoded fallback values
+  [warn] project_division() called without live rival projections -- using stale hardcoded fallback values
+  [warn] project_division() called without live rival projections -- using stale hardcoded fallback values
+  [warn] project_division() called without live rival projections -- using stale hardcoded fallback values
+  [warn] project_division() called without live rival projections -- using stale hardcoded fallback values
+  [warn] project_division() called without live rival projections -- using stale hardcoded fallback values
+  [warn] project_division() called without live rival projections -- using stale hardcoded fallback values
+  [warn] project_division() called without live rival projections -- using stale hardcoded fallback values
+  [warn] project_division() called without live rival projections -- using stale hardcoded fallback values
+Traceback (most recent call last):
+  File "C:\Users\geoff\OneDrive\Desktop\MLB PROJECT\main.py", line 108, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "C:\Users\geoff\OneDrive\Desktop\MLB PROJECT\main.py", line 75, in main
+    path = generate_report(data, analysis, grades, recs, scenarios)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\geoff\OneDrive\Desktop\MLB PROJECT\output_report.py", line 893, in generate_report
+    wb.save(path)
+  File "C:\Users\geoff\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\openpyxl\workbook\workbook.py", line 386, in save
+    save_workbook(self, filename)
+  File "C:\Users\geoff\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.11_qbz5n2kfra8p0\LocalCache\local-packages\Python311\site-packages\openpyxl\writer\excel.py", line 291, in save_workbook
+    archive = ZipFile(filename, 'w', ZIP_DEFLATED, allowZip64=True)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\zipfile.py", line 1294, in __init__
+    self.fp = io.open(file, filemode)
+              ^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [Errno 13] Permission denied: 'C:\\Users\\geoff\\OneDrive\\Desktop\\MLB PROJECT\\output\\mariners_report_20260901.xlsx'
+PS C:\Users\geoff\OneDrive\Desktop\MLB PROJECT> 
