@@ -69,91 +69,46 @@ IL_RETURNS = [
     # ("DFA on return - no impact"), so it was contributing nothing -- dead
     # weight, not worth keeping around.
     #
-    # J.P. Crawford ADDED 2026-08-03: placed on 10-day IL July 19 with wrist
-    # inflammation (Fox 13 Seattle). Hollander said "couple weeks" -- treated
-    # as MEDIUM confidence given that's a specific-enough estimate.
+    # J.P. Crawford, Carlos Vargas, Cooper Criswell all removed 2026-08-03+:
+    # all three confirmed activated/back, same double-counting risk as Julio.
     #
-    # Vargas/Brash/Criswell dates updated 2026-08-03 from GM Justin
-    # Hollander's own public timeline updates (union-bulletin.com,
-    # sports.mynorthwest.com, MLB.com, Yahoo Sports -- all within the last
-    # week) -- the old dates here (Jul 20 for Brash, Aug 3 for Vargas, Aug 15
-    # for Criswell) were significantly out of date; all three slipped later
-    # into August than originally hoped.
-    {
-        "name":         "Will Wilson",
-        "pos":          "3B",
-        "return_date":  date(2026, 9, 15),   # confirmed still on 60-day IL
-        "early_return": date(2026, 9, 1),    # (thumb) as of Aug 6-9 per
-        "late_return":  date(2026, 9, 28),   # KJR radio report -- no specific
-        "rs_impact":    0.02,                # target date given anywhere,
-        "ra_impact":    0.00,                # so this is a wide, genuinely
-        "confidence":   "LOW",               # low-confidence guess, not a
-        "note":         "Bench depth -- confirmed still on 60-day IL "
-                        "(thumb) as of Aug 6-9, no target date reported",
-    },
-    {
-        "name":         "J.P. Crawford",
-        "pos":          "SS",
-        "return_date":  date(2026, 9, 5),    # the old Aug 2 estimate was
-        "early_return": date(2026, 8, 25),   # WRONG -- confirmed via a live
-        "late_return":  date(2026, 9, 15),   # bbref fetch that he's STILL on
-        "rs_impact":    0.10,                # the IL as of Aug 14. A separate
-        "ra_impact":    0.00,                # report said "down 3-5 days
-        "confidence":   "LOW",               # after an injection, then ramp
-        "note":         "Elite OBP/walk rate -- still on IL as of Aug 14 "
-                        "(confirmed via live bbref fetch), well past the "
-                        "earlier Aug 2 estimate. Re-verify before trusting "
-                        "this date either.",
-    },
+    # Matt Brash REMOVED 2026-09-11: confirmed SEASON-ENDING as of Sept 3-5
+    # reporting (Athlon Sports, Seattle Times/MLBTR, Spokesman-Review) --
+    # shut down for 8 weeks after continued lat inflammation, officially
+    # done for 2026. Modeling him as "returning soon" at this point would
+    # be actively wrong, not just stale -- same treatment as a confirmed
+    # activation, just the opposite direction (confirmed NOT returning
+    # rather than confirmed already back).
+    #
+    # Will Wilson REMOVED 2026-09-11: real update found via search shows
+    # his situation got WORSE, not better, since the last estimate --
+    # "being pulled off his rehab assignment. He will see a specialist to
+    # determine if he needs season-ending surgery" (per live reporting).
+    # The old entry's hopeful Sept 15 return_date is no longer defensible
+    # given this. Treated the same as Brash -- removed rather than left
+    # with a stale, now-contradicted estimate.
+    #
+    # Cole Wilcox UPDATED 2026-09-11: real, current info via MLB.com's own
+    # injury tracker (last updated Sept 3) -- "will throw from the mound
+    # either Sept. 5 or 6," "expected return: maybe late September," club
+    # hopes for a Tacoma rehab assignment before Tacoma's season ends in
+    # three weeks. Genuinely still a live case, unlike Brash/Wilson --
+    # dates updated to reflect this, not removed.
     {
         "name":         "Cole Wilcox",
         "pos":          "RP",
-        "return_date":  date(2026, 8, 28),   # oblique strains typically
-        "early_return": date(2026, 8, 21),   # 3-4 weeks; official word is
-        "late_return":  date(2026, 9, 10),   # just "TBD" as of Aug 7, so
-        "rs_impact":    0.00,                # this is an estimate, not a
-        "ra_impact":    0.03,                # reported target
-        "confidence":   "LOW",
-        "note":         "Left oblique strain, placed Aug 7. Was a "
-                        "dependable reliever pre-injury (4.00 ERA, 27 IP) "
-                        "-- no official target date reported yet",
-    },
-    {
-        "name":         "Matt Brash",
-        "pos":          "RP",
-        "return_date":  date(2026, 8, 25),   # "Aug 22-28 range" per Hollander
-        "early_return": date(2026, 8, 20),
-        "late_return":  date(2026, 9, 1),
-        "rs_impact":    0.00,
-        "ra_impact":    0.10,
-        "confidence":   "MEDIUM",
-        "note":         "0.54 ERA closer -- right lat inflammation, "
-                        "targeting Aug 22-28 return",
-    },
-    {
-        "name":         "Carlos Vargas",
-        "pos":          "RP",
-        "return_date":  date(2026, 8, 22),   # pushed back from Aug 15 --
-        "early_return": date(2026, 8, 18),   # confirmed "about to begin a
-        "late_return":  date(2026, 8, 28),   # rehab assignment" as of
-        "rs_impact":    0.00,                # ~Aug 14, and rehab stints
-        "ra_impact":    0.05,                # themselves typically run
-        "confidence":   "MEDIUM",            # 1-2 weeks before MLB
-                                              # activation
-        "note":         "Bullpen depth -- right lat strain, beginning "
-                        "rehab assignment as of mid-Aug after missing "
-                        "116 straight games",
-    },
-    {
-        "name":         "Cooper Criswell",
-        "pos":          "RP",
-        "return_date":  date(2026, 8, 30),   # "Aug 28-Sept 1" per Hollander
-        "early_return": date(2026, 8, 28),
-        "late_return":  date(2026, 9, 5),
-        "rs_impact":    0.00,
-        "ra_impact":    0.04,
-        "confidence":   "LOW",               # furthest out, most uncertain
-        "note":         "Right shoulder/pec strain -- targeting Aug 28-Sept 1 return",
+        "return_date":  date(2026, 9, 22),   # "maybe late September" per
+        "early_return": date(2026, 9, 15),   # MLB.com's own tracker,
+        "late_return":  date(2026, 9, 27),   # last updated Sept 3 --
+        "rs_impact":    0.00,                # genuinely uncertain ("maybe"),
+        "ra_impact":    0.03,                # not a firm target, hence
+        "confidence":   "LOW",               # still LOW confidence and a
+        "note":         "Left oblique strain, placed Aug 7. Throwing off "
+                        "the mound again as of Sept 5-6; club hopes for a "
+                        "Tacoma rehab assignment before their season ends "
+                        "(~3 weeks out as of Sept 3). Real, current case, "
+                        "genuinely uncertain whether he factors into the "
+                        "final stretch at all given how few games remain.",
     },
 ]
 
@@ -646,11 +601,16 @@ def run_simulation(custom_acquisitions: list = None, schedule: dict = None,
     )
 
     # scenario 3: worst case - no IL returns land on schedule
+    # UPDATED 2026-09-11: was still listing Brash/Vargas/Criswell/Crawford/
+    # Wilson by name -- all removed from IL_RETURNS above (confirmed back
+    # or confirmed season-ending), so those names were silently matching
+    # nothing. Harmless in effect, but stale and misleading about what
+    # this scenario actually models now. Cole Wilcox is the only real,
+    # still-live case left.
     scenarios["worst_case"] = _build_scenario(
         "Worst Case - IL returns slip/setback",
         acquisitions=[],
-        il_returns=["Matt Brash", "Carlos Vargas", "Cooper Criswell",
-                     "J.P. Crawford", "Will Wilson", "Cole Wilcox"],
+        il_returns=["Cole Wilcox"],
         include_luck=False,
         use_late_returns=True,
         schedule=schedule,

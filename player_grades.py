@@ -16,8 +16,34 @@ Usage:
 """
 
 import pandas as pd
+import re
 from roster import get_roster_last_names
 from name_matching import last_name_only
+
+
+def _clean_name_for_lookup(name: str) -> list:
+    """
+    Strips ANY parenthetical annotation from a player name before
+    extracting their last name for a WAR/Statcast table lookup --
+    "(60-day IL)", "(15-day IL)", "(40-man)", or any future variant.
+
+    BUG FIX 2026-09-01: the previous version hardcoded specific phrases
+    to strip ("10-day IL", "15-day IL", "40-man") but never "60-day IL"
+    or "7-day IL". For any player tagged with one of those two, the
+    leftover word after splitting was literally "IL" (not their
+    surname) -- e.g. "Matt Brash (60-day IL)" produced last="IL", and
+    a substring search for "IL" in the WAR table coincidentally matched
+    "Gilbert" (contains "il") first, silently giving Brash, Davila, and
+    anyone else on a 60-day or 7-day IL stint someone ELSE's WAR and
+    xwOBA. A real user caught this by noticing three unrelated pitchers
+    (Brash, Gilbert, Davila) all showing an identical WAR value -- not
+    a coincidence, all three were resolving to Gilbert's row. Using a
+    regex to strip ANY "(...)" content generically fixes this for every
+    current and future annotation variant, not just the ones someone
+    thought to hardcode.
+    """
+    cleaned = re.sub(r"\([^)]*\)", "", name).strip()
+    return cleaned.split() if cleaned else []
 
 # ── thresholds ────────────────────────────────────────────────────────────────
 # batter OPS (primary when xwOBA not available)
@@ -331,6 +357,123 @@ def _pitcher_action(name: str, grade: str,
 
 
 # ── main grader ───────────────────────────────────────────────────────────────
+def compute_league_baselines(data: dict) -> dict:
+    """
+    Computes REAL, live, PA/BF-weighted league-average xwOBA (batters)
+    and xwOBA-against (pitchers) from the same Statcast leaderboard data
+    already scraped for the whole league -- not a hardcoded constant.
+    Used as the shrinkage target below.
+    """
+    bat = data.get("statcast", {}).get("batters", pd.DataFrame())
+    pit = data.get("statcast", {}).get("pitchers", pd.DataFrame())
+
+    bat_avg = 0.310  # sane fallback only if the live computation fails
+    pit_avg = 0.320
+
+    if not bat.empty and "xwOBA" in bat.columns and "PA" in bat.columns:
+        xw = pd.to_numeric(bat["xwOBA"], errors="coerce")
+        pa = pd.to_numeric(bat["PA"], errors="coerce")
+        valid = xw.notna() & pa.notna() & (pa > 0)
+        if valid.any():
+            bat_avg = round((xw[valid] * pa[valid]).sum() / pa[valid].sum(), 3)
+
+    if not pit.empty and "xwOBA_against" in pit.columns and "PA" in pit.columns:
+        xw = pd.to_numeric(pit["xwOBA_against"], errors="coerce")
+        bf = pd.to_numeric(pit["PA"], errors="coerce")  # "PA" here is
+                                                        # really batters
+                                                        # faced, bbref's
+                                                        # own column name
+        valid = xw.notna() & bf.notna() & (bf > 0)
+        if valid.any():
+            pit_avg = round((xw[valid] * bf[valid]).sum() / bf[valid].sum(), 3)
+
+    # BUG FIX 2026-09-01: OPS and ERA fallback grading (used whenever
+    # xwOBA/xwOBA-against is missing OR discarded as contaminated -- see
+    # the multi-team contamination fix above) previously used the RAW
+    # value with NO shrinkage protection at all, unlike the xwOBA path.
+    # This let the exact same small-sample noise problem back in through
+    # a different door: Will Wilson's 1.133 OPS in 6 PA graded "Elite"
+    # even after correctly discarding his contaminated Statcast data,
+    # since _grade_ops() has no PA floor or regression built in. Adding
+    # real, live, PA/IP-weighted OPS and ERA baselines here so the same
+    # _shrink() treatment can be applied to both fallback paths, not
+    # just the primary xwOBA-based one.
+    ops_avg = 0.720
+    era_avg = 4.30
+    bat_leaders = data.get("batting", {}).get("all_players", pd.DataFrame())
+    pit_leaders = data.get("pitching", {}).get("all_players", pd.DataFrame())
+
+    if not bat_leaders.empty and "OPS" in bat_leaders.columns and "PA" in bat_leaders.columns:
+        ops = pd.to_numeric(bat_leaders["OPS"], errors="coerce")
+        pa = pd.to_numeric(bat_leaders["PA"], errors="coerce")
+        valid = ops.notna() & pa.notna() & (pa > 0)
+        if valid.any():
+            ops_avg = round((ops[valid] * pa[valid]).sum() / pa[valid].sum(), 3)
+
+    if not pit_leaders.empty and "ERA" in pit_leaders.columns and "IP" in pit_leaders.columns:
+        era = pd.to_numeric(pit_leaders["ERA"], errors="coerce")
+        ip = pd.to_numeric(pit_leaders["IP"], errors="coerce")
+        valid = era.notna() & ip.notna() & (ip > 0)
+        if valid.any():
+            era_avg = round((era[valid] * ip[valid]).sum() / ip[valid].sum(), 2)
+
+    return {"batter_xwoba": bat_avg, "pitcher_xwoba_against": pit_avg,
+            "batter_ops": ops_avg, "pitcher_era": era_avg}
+
+
+def _sample_confidence(n: float, thresholds: tuple) -> str:
+    """
+    Real, separate confidence indicator based purely on sample size --
+    NOT baked into the grade or the stat itself. This is the resolution
+    to a real tension found tonight: Matt Brash's 0.54 ERA over 16.2 IP
+    genuinely IS an elite rate (shrinking the ERA itself to "fix" this
+    was tried and reverted -- it corrupted a real, true fact about what
+    he actually did). But 16.2 IP genuinely isn't enough to be
+    CONFIDENT that rate reflects his true, sustained talent level
+    either. Both things are true at once: describe what happened
+    honestly (the grade), and separately flag how much to trust it
+    continuing (this). `thresholds` is (low_cutoff, medium_cutoff) --
+    different for batters (PA) vs pitchers (IP) since they stabilize at
+    different sample sizes.
+    """
+    low, medium = thresholds
+    if n is None or pd.isna(n):
+        return "LOW"
+    if n < low:
+        return "LOW"
+    if n < medium:
+        return "MEDIUM"
+    return "HIGH"
+
+
+def _shrink(observed: float, n: float, baseline: float, k: float) -> float:
+    """
+    Standard shrinkage/regression-to-the-mean: blends an observed rate
+    toward a league-average baseline, weighted by how much real sample
+    size backs it up. At n=0 this returns the baseline; as n grows much
+    larger than k, this converges to the raw observed rate; the
+    resulting number will always sit BETWEEN them.
+
+    `k` is the stabilization point -- how many PA/BF it takes for a
+    rate stat to become reasonably trustworthy on its own. This project
+    uses PA=100 for batter xwOBA and BF=100 for pitcher xwOBA-against,
+    both standard, widely-cited sabermetric rules of thumb for wOBA-
+    type rate stats (see e.g. Russell Carleton's stabilization-point
+    research) -- not numbers invented for this project.
+
+    DIRECTLY MOTIVATED by two real cases found in this project: Will
+    Wilson's 2-PA sample producing a nonsensical extrapolated WAR
+    figure, and Matt Brash's 16.2-IP sample producing a 743 ERA+ that's
+    mathematically correct but not a trustworthy read on his true talent
+    level. Shrinkage fixes this at the GRADING step -- the raw stat is
+    still shown for transparency, but the grade itself is based on the
+    more defensible, shrunk value.
+    """
+    if observed is None or pd.isna(observed) or n is None or n <= 0:
+        return baseline
+    return round((observed * n + baseline * k) / (n + k), 3)
+
+
 def grade_players(data: dict) -> dict:
     """
     Grades ALL Mariners players from bbref roster.
@@ -351,6 +494,10 @@ def grade_players(data: dict) -> dict:
     bat_luck   = data.get("statcast", {}).get("bat_luck", pd.DataFrame())
     pit_luck   = data.get("statcast", {}).get("pit_luck", pd.DataFrame())
     roster_df  = data.get("seattle", {}).get("roster", pd.DataFrame())
+    baselines  = compute_league_baselines(data)
+    print(f"  [grade] league baselines (live, PA/BF-weighted): "
+          f"batter xwOBA {baselines['batter_xwoba']}, "
+          f"pitcher xwOBA against {baselines['pitcher_xwoba_against']}")
 
     # BUG FIX 2026-09-01: grade_players() used to pull its player list
     # straight from bbref's season-long team stat pages, which correctly
@@ -399,7 +546,7 @@ def grade_players(data: dict) -> dict:
             # WAR from value table
             war = None
             if not val_bat.empty and "Name" in val_bat.columns:
-                name_parts = name.replace("(","").replace(")","").replace("40-man","").replace("10-day IL","").replace("15-day IL","").strip().split()
+                name_parts = _clean_name_for_lookup(name)
                 last = name_parts[-1].strip() if name_parts else name.split(",")[0].strip()
                 m = val_bat[val_bat["Name"].str.contains(
                     last, case=False, na=False, regex=False)]
@@ -414,9 +561,10 @@ def grade_players(data: dict) -> dict:
             woba  = None
             barrel = None
             hardhit = None
+            stats_contaminated = False
             if not sea_sc_bat.empty and "Name" in sea_sc_bat.columns:
                 # try last word of bbref name as last name
-                name_parts = name.replace("(","").replace(")","").replace("40-man","").replace("10-day IL","").replace("15-day IL","").strip().split()
+                name_parts = _clean_name_for_lookup(name)
                 last = name_parts[-1].strip() if name_parts else name.split(",")[0].strip()
                 m = sea_sc_bat[sea_sc_bat["Name"].str.contains(
                     last, case=False, na=False, regex=False)]
@@ -432,14 +580,76 @@ def grade_players(data: dict) -> dict:
                         m.get("HardHit%", pd.Series([None])).values[0],
                         errors="coerce")
 
+                    # BUG FIX 2026-09-01: Baseball Savant's leaderboard
+                    # reports a player's FULL-SEASON total across every
+                    # team they played for, not team-specific splits.
+                    # For anyone traded mid-season onto Seattle, this
+                    # silently blends their (often better) performance
+                    # with their OLD team into the same xwOBA/wOBA/
+                    # Barrel%/HardHit% used to grade their time here --
+                    # a real user caught this directly with Taylor Ward:
+                    # Statcast showed 285 PA / .350 xwOBA, but his real
+                    # Mariners-only line (bbref) is just 89 PA and a
+                    # .366 OPS. The "he's been unlucky" read was
+                    # actually wrong -- his good pre-trade performance
+                    # was masking a genuinely poor Mariners performance,
+                    # not a bug in which player got matched (the name
+                    # match was correct), a bug in which TIME PERIOD the
+                    # matched numbers cover. Detected by comparing
+                    # Statcast PA against bbref's team-specific PA: if
+                    # Statcast's PA is meaningfully larger, the numbers
+                    # aren't scoped to this team and shouldn't be
+                    # trusted for grading -- fall back to OPS-based
+                    # grading instead, same fallback path already used
+                    # when Statcast data is missing entirely.
+                    sc_pa = pd.to_numeric(m.get("PA", pd.Series([None])).values[0],
+                                         errors="coerce")
+                    if sc_pa and pa and sc_pa > pa * 1.5:
+                        print(f"  [warn] {name}: Statcast PA ({int(sc_pa)}) far "
+                              f"exceeds Seattle PA ({int(pa)}) -- likely blends "
+                              f"pre-trade stats with another team. Discarding "
+                              f"Statcast fields, grading on OPS instead.")
+                        xwoba = woba = barrel = hardhit = None
+                        stats_contaminated = True
+
             # luck
             luck = round(float(woba) - float(xwoba), 3) \
                    if woba and xwoba and \
                    not pd.isna(woba) and not pd.isna(xwoba) else None
 
-            # grade — prefer xwOBA, fall back to OPS
-            xg = _grade_xwoba(xwoba)
-            grade = xg if xg else _grade_ops(ops)
+            # grade — prefer xwOBA, fall back to OPS. Uses the SHRUNK
+            # xwOBA (see _shrink()) rather than the raw value -- at low
+            # PA this pulls a noisy small-sample rate toward the real
+            # league average instead of grading off it directly. Has
+            # near-zero effect once PA is already large; raw xwOBA is
+            # still shown in the output for transparency.
+            #
+            # BUG FIX 2026-09-01: when stats_contaminated is True (see
+            # above), xwoba is deliberately None -- but _shrink(None,...)
+            # returns the league BASELINE, not None, since that's the
+            # correct behavior for a player who genuinely has no
+            # Statcast data at all (want a defined grade, not "Unknown").
+            # That meant _grade_xwoba() still produced a real grade off
+            # the league-average baseline even for a contaminated player,
+            # so the intended "fall back to OPS" branch below never
+            # actually triggered -- confirmed directly on Taylor Ward,
+            # who kept grading "Average" (from the .320 league baseline)
+            # instead of correctly grading on his real .362 OPS. Skip the
+            # xwOBA path entirely when contaminated, rather than relying
+            # on it happening to return something falsy.
+            if stats_contaminated:
+                xwoba_shrunk = None
+                xg = None
+            else:
+                xwoba_shrunk = _shrink(xwoba, pa, baselines["batter_xwoba"], k=100)
+                xg = _grade_xwoba(xwoba_shrunk)
+            # BUG FIX 2026-09-01: OPS fallback now shrunk too (see
+            # compute_league_baselines() note above) -- k=150 rather
+            # than the 100 used for xwOBA, since OPS is a composite of
+            # multiple component rates (BA+OBP+SLG) and is genuinely
+            # noisier at a given PA than a single rate stat like xwOBA.
+            ops_shrunk = _shrink(ops, pa, baselines["batter_ops"], k=150)
+            grade = xg if xg else _grade_ops(ops_shrunk)
 
             # franchise / DFA / IL overrides
             role = "IL" if _is_il(name) else \
@@ -466,6 +676,8 @@ def grade_players(data: dict) -> dict:
                 "RBI":     int(rbi),
                 "SB":      int(sb),
                 "xwOBA":   round(xwoba, 3) if xwoba  else None,
+                "xwOBA_shrunk": xwoba_shrunk,
+                "confidence": _sample_confidence(pa, thresholds=(50, 150)),
                 "wOBA":    round(woba,  3) if woba   else None,
                 "luck":    luck,
                 "Barrel%": round(barrel,1) if barrel else None,
@@ -493,6 +705,7 @@ def grade_players(data: dict) -> dict:
             gs   = pd.to_numeric(row.get("GS",   0),    errors="coerce") or 0
             g    = pd.to_numeric(row.get("G",    0),    errors="coerce") or 0
             sv   = pd.to_numeric(row.get("SV",   0),    errors="coerce") or 0
+            bf   = pd.to_numeric(row.get("BF",   0),    errors="coerce") or 0
             w    = pd.to_numeric(row.get("W",    0),    errors="coerce") or 0
             l    = pd.to_numeric(row.get("L",    0),    errors="coerce") or 0
 
@@ -504,7 +717,7 @@ def grade_players(data: dict) -> dict:
             # WAR
             war = None
             if not val_pit.empty and "Name" in val_pit.columns:
-                name_parts = name.replace("(","").replace(")","").replace("40-man","").replace("10-day IL","").replace("15-day IL","").strip().split()
+                name_parts = _clean_name_for_lookup(name)
                 last = name_parts[-1].strip() if name_parts else name.split(",")[0].strip()
                 m = val_pit[val_pit["Name"].str.contains(
                     last, case=False, na=False, regex=False)]
@@ -517,8 +730,9 @@ def grade_players(data: dict) -> dict:
             woba_against  = None
             whiff = None
             barrel_against = None
+            stats_contaminated = False
             if not sea_sc_pit.empty and "Name" in sea_sc_pit.columns:
-                name_parts = name.replace("(","").replace(")","").replace("40-man","").replace("10-day IL","").replace("15-day IL","").strip().split()
+                name_parts = _clean_name_for_lookup(name)
                 last = name_parts[-1].strip() if name_parts else name.split(",")[0].strip()
                 m = sea_sc_pit[sea_sc_pit["Name"].str.contains(
                     last, case=False, na=False, regex=False)]
@@ -535,6 +749,28 @@ def grade_players(data: dict) -> dict:
                               pd.Series([None])).values[0],
                         errors="coerce")
 
+                    # BUG FIX 2026-09-01: same multi-team contamination
+                    # issue as the batter side above -- Baseball Savant's
+                    # per-player search returns SEASON-TOTAL stats across
+                    # every team a player appeared for, not a split for
+                    # just their time with Seattle. Confirmed on
+                    # Dominguez directly: Statcast showed 97 total
+                    # batters faced (Chicago White Sox + Seattle
+                    # combined), while his real Mariners-only line is
+                    # much smaller. Same detection and fallback as
+                    # batters: if Statcast's own reported PA (batters
+                    # faced) is much larger than bbref's real,
+                    # team-specific BF, don't trust it for grading.
+                    sc_bf = pd.to_numeric(m.get("PA", pd.Series([None])).values[0],
+                                         errors="coerce")
+                    if sc_bf and bf and sc_bf > bf * 1.5:
+                        print(f"  [warn] {name}: Statcast BF ({int(sc_bf)}) far "
+                              f"exceeds Seattle BF ({int(bf)}) -- likely blends "
+                              f"stats with another team. Discarding Statcast "
+                              f"fields, grading on ERA instead.")
+                        xwoba_against = woba_against = whiff = barrel_against = None
+                        stats_contaminated = True
+
             # luck for pitchers
             luck = round(float(woba_against) - float(xwoba_against), 3) \
                    if woba_against and xwoba_against and \
@@ -544,8 +780,40 @@ def grade_players(data: dict) -> dict:
             # role
             role = "SP" if gs >= 3 else ("CL" if sv >= 3 else "RP")
 
-            # grade — blend ERA + xwOBA + WAR
-            grade = _grade_era(era, xwoba_against, war, ip)
+            # grade — blend ERA + xwOBA + WAR. Uses SHRUNK xwOBA against
+            # (see _shrink()) rather than the raw value -- same reasoning
+            # as the batter side above, using batters-faced (BF) as the
+            # sample size to match how the league baseline itself was
+            # BF-weighted. Directly motivated by Matt Brash's 16.2-IP,
+            # 743-ERA+ sample from earlier this session -- mathematically
+            # real, not a trustworthy read on true talent at that sample
+            # size. Raw xwOBA against still shown in output for transparency.
+            #
+            # BUG FIX 2026-09-01: same contamination-bypass fix as the
+            # batter side -- when stats_contaminated is True, skip the
+            # shrinkage/xwOBA path entirely rather than letting
+            # _shrink(None,...) quietly return the league baseline and
+            # produce a real (wrong) grade anyway.
+            if stats_contaminated:
+                xwoba_against_shrunk = None
+            else:
+                xwoba_against_shrunk = _shrink(xwoba_against, bf,
+                                               baselines["pitcher_xwoba_against"], k=100)
+            # REVERTED 2026-09-11: shrinking ERA the same way as OPS
+            # directly broke a real case we'd already worked through
+            # tonight -- Matt Brash's 0.54 ERA over 16.2 IP got pulled
+            # all the way to a shrunk 3.22, dropping his grade from
+            # Elite to Above Average. That's a real overcorrection, not
+            # a fix: 16.2 IP is a meaningful fraction of a full relief
+            # season (many closers only throw 50-60 IP total), not the
+            # same kind of near-meaningless sample as Wilson's 6 PA --
+            # and there was never an actual demonstrated problem with
+            # raw ERA the way Wilson's 1.133 OPS proved one for OPS
+            # (Hoby Milner's 2.1 IP was already caught by _grade_era's
+            # existing ip<5 "Small sample" floor). Reverting to raw ERA;
+            # the xwOBA-against and OPS shrinkage fixes both stay, since
+            # both had a real, demonstrated failure case behind them.
+            grade = _grade_era(era, xwoba_against_shrunk, war, ip)
 
             action = _pitcher_action(name, grade, luck, era, role)
             note   = _generate_pitcher_note(era, xwoba_against, k9,
@@ -570,6 +838,8 @@ def grade_players(data: dict) -> dict:
                 "SV":             int(sv),
                 "xwOBA_against":  round(xwoba_against, 3)
                                   if xwoba_against else None,
+                "xwOBA_against_shrunk": xwoba_against_shrunk,
+                "confidence": _sample_confidence(ip, thresholds=(20, 50)),
                 "wOBA_against":   round(woba_against, 3)
                                   if woba_against  else None,
                 "luck":           luck,
@@ -582,23 +852,45 @@ def grade_players(data: dict) -> dict:
     # ── summary ──
     all_grades  = [g["grade"].split("—")[0].strip()
                    for g in batter_grades + pitcher_grades]
-    dfa_list    = [g["name"] for g in batter_grades + pitcher_grades
-                   if "DFA" in g.get("action","")
-                   and "small sample" not in g.get("action","").lower()
-                   and "depth piece" not in g.get("action","").lower()
-                   and not any(fp.lower() in g["name"].lower()
-                               for fp in FRANCHISE_PLAYERS)]
-    elite_list  = [g["name"] for g in batter_grades + pitcher_grades
-                   if g["grade"] == "Elite"]
-    concern_list= [g["name"] for g in batter_grades + pitcher_grades
-                   if ("Monitor" in g.get("action","") or
-                      "Role change" in g.get("action",""))
-                   and "Small sample" not in g.get("grade","")
-                   and (g.get("IP",0) or 0) >= 8
-                      or (g.get("PA",0) or 0) >= 30
-                      and ("Monitor" in g.get("action","") or
-                           "Role change" in g.get("action",""))
-                   ]
+
+    # BUG FIX 2026-09-01: these three lists were still checking for
+    # action text from BEFORE the KEEP/DFA/MONITOR/AAA/IL/DEPTH tag
+    # simplification earlier tonight -- "Monitor" (mixed case, no
+    # longer exists -- the real tag is "MONITOR") and "Role change"
+    # (removed entirely, was one of the hardcoded overrides taken out).
+    # Since Python's `in` is case-sensitive, "Monitor" in "MONITOR" is
+    # False, so concern_list was silently almost always empty ("Concerns:
+    # none" even with several real MONITOR-tagged players visible in the
+    # same report) -- a real user caught this directly. Also
+    # deduplicating by name here: a player who appears as both a batter
+    # AND a mop-up pitcher (e.g. Leo Rivas) could legitimately hit the
+    # DFA condition in both of their entries, showing up twice in what
+    # should be a simple name list.
+    seen_dfa = set()
+    dfa_list = []
+    for g in batter_grades + pitcher_grades:
+        if (g.get("action","") == "DFA"
+                and not any(fp.lower() in g["name"].lower() for fp in FRANCHISE_PLAYERS)
+                and g["name"] not in seen_dfa):
+            dfa_list.append(g["name"])
+            seen_dfa.add(g["name"])
+
+    seen_elite = set()
+    elite_list = []
+    for g in batter_grades + pitcher_grades:
+        if g["grade"] == "Elite" and g["name"] not in seen_elite:
+            elite_list.append(g["name"])
+            seen_elite.add(g["name"])
+
+    seen_concern = set()
+    concern_list = []
+    for g in batter_grades + pitcher_grades:
+        action = g.get("action", "")
+        is_concern = action == "MONITOR"
+        big_enough_sample = (g.get("IP", 0) or 0) >= 8 or (g.get("PA", 0) or 0) >= 30
+        if is_concern and big_enough_sample and g["name"] not in seen_concern:
+            concern_list.append(g["name"])
+            seen_concern.add(g["name"])
 
     summary = {
         "total_batters":  len(batter_grades),
@@ -664,7 +956,7 @@ def print_grades(grades: dict):
     # ── batters ──
     print(f"\n── BATTERS ({len(grades['batters'])}) ──")
     print(f"{'Name':<28} {'Grade':<25} {'PA':>4} {'OPS':>5} "
-          f"{'xwOBA':>6} {'Luck':>6} {'HR':>3} {'WAR':>4}  Action")
+          f"{'xwOBA':>6} {'Luck':>6} {'HR':>3} {'WAR':>4} {'Conf':>4}  Action")
     print("─" * 120)
 
     for g in sorted(grades["batters"], key=sort_key):
@@ -677,14 +969,14 @@ def print_grades(grades: dict):
         # its own column on this same row, so the extra prose was pure
         # redundancy on top of what the user wanted as a plain tag
         print(f"{g['name']:<28} {g['grade']:<25} {g['PA']:>4} "
-              f"{ops:>5} {xw:>6} {luck:>6} {g['HR']:>3} {war:>4}  "
-              f"{g['action']}")
+              f"{ops:>5} {xw:>6} {luck:>6} {g['HR']:>3} {war:>4} "
+              f"{g.get('confidence','?'):>4}  {g['action']}")
 
     # ── pitchers ──
     print(f"\n── PITCHERS ({len(grades['pitchers'])}) ──")
     print(f"{'Name':<28} {'Rol':<3} {'Grade':<20} {'IP':>5} "
           f"{'ERA':>5} {'WHIP':>5} {'K/9':>4} {'xwOBA':>6} "
-          f"{'Luck':>6} {'WAR':>4}  Action")
+          f"{'Luck':>6} {'WAR':>4} {'Conf':>4}  Action")
     print("─" * 130)
 
     for g in sorted(grades["pitchers"], key=sort_key):
@@ -696,7 +988,7 @@ def print_grades(grades: dict):
         war   = f"{g['WAR']:>4.1f}"         if g["WAR"]           else " N/A"
         print(f"{g['name']:<28} {g['role']:<3} {g['grade']:<20} "
               f"{g['IP']:>5} {era:>5} {whip:>5} {k9:>4} {xw:>6} "
-              f"{luck:>6} {war:>4}  {g['action']}")
+              f"{luck:>6} {war:>4} {g.get('confidence','?'):>4}  {g['action']}")
 
     # ── summary ──
     s = grades["summary"]

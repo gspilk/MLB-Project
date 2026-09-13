@@ -372,45 +372,39 @@ def _immediate_moves(grades, analysis):
         if _is_franchise(name):
             continue
 
-        if "DFA" in action and \
-           "small sample" not in action.lower() and \
-           "depth" not in action.lower() and \
-           name not in seen:
+        # BUG FIX 2026-09-01: this was still checking substring patterns
+        # from BEFORE the KEEP/DFA/MONITOR/AAA/IL/DEPTH tag simplification
+        # earlier tonight -- "small sample"/"depth" substring exclusions
+        # (dead now that DFA is an exact tag, never a compound sentence),
+        # and action.replace("DFA -- ", "") (silently a no-op now, since
+        # that text pattern doesn't exist in the tag anymore -- the
+        # "reason" ended up just being the literal word "DFA"). Fixed to
+        # use an exact tag match and build a real reason from actual
+        # available stats instead of parsing text that no longer carries
+        # that information.
+        if action == "DFA" and name not in seen:
             seen.add(name)
+            stat_bit = (f"{g['WAR']} WAR" if g.get("WAR") is not None else
+                       f"{g.get('grade','')} grade")
             moves.append({
                 "type":   "DFA",
                 "player": name,
-                "reason": action.replace("DFA — ",""),
+                "reason": f"Below replacement level -- {stat_bit}",
                 "urgency":"IMMEDIATE",
             })
 
-    for g in grades.get("pitchers",[]):
-        name   = g["name"]
-        action = g.get("action","")
-        if "Role change" in action and name not in seen:
-            seen.add(name)
-            moves.append({
-                "type":   "ROLE CHANGE",
-                "player": name,
-                "reason": action,
-                "urgency":"IMMEDIATE",
-            })
-        if "Promote to closer" in action and name not in seen:
-            seen.add(name)
-            moves.append({
-                "type":   "ROLE CHANGE",
-                "player": name,
-                "reason": action,
-                "urgency":"IMMEDIATE",
-            })
-        if "piggyback" in action.lower() and name not in seen:
-            seen.add(name)
-            moves.append({
-                "type":   "PIGGYBACK",
-                "player": name,
-                "reason": action,
-                "urgency":"SOON",
-            })
+    # REMOVED 2026-09-01: this used to check for "Role change",
+    # "Promote to closer", and "piggyback" substrings in the action
+    # text -- all three were hardcoded, name-matched special-case
+    # overrides (Munoz/Brash/Kirby specifically) that got removed
+    # entirely from _pitcher_action() earlier tonight for being frozen
+    # guesses rather than live data (see that function's own docstring).
+    # There's no equivalent dynamic detection to replace them with --
+    # role changes and rotation piggybacking aren't something derivable
+    # from grade/ERA/WAR alone -- so rather than leave permanently-dead
+    # checks in place, they're just gone. If real role-change detection
+    # ever gets built, it needs actual role/usage data, not a text
+    # pattern match on an action tag that no longer carries that info.
 
     for p in analysis.get("health",{}).get("returning_soon",[]):
         moves.append({
@@ -460,14 +454,36 @@ def _rotation_bullpen(grades):
         [g for g in grades.get("pitchers",[]) if g["role"] in ("RP","CL")],
         key=lambda x: x.get("xwOBA_against") or 1.0
     )
+
+    # BUG FIX 2026-09-01: this used to return 5 fully hardcoded,
+    # never-updated strings -- "Closer: Matt Brash", "Setup: Andres
+    # Munoz -- move from closer", "6th man: Luis Castillo" -- written
+    # once early in the project and never touched since. A real user
+    # caught this directly: Castillo was traded away in August, yet
+    # this was STILL recommending him as the 6th starter in a report
+    # generated in September. "closer"/"setup"/"high_leverage" are
+    # removed entirely -- they were purely redundant with (and by now
+    # flatly contradicted by) the real, correctly-sorted `bullpen` list
+    # right above, which already shows exactly who's actually performing
+    # best today. "piggyback" is removed too -- which two starters
+    # should share a workload isn't something derivable from xwOBA
+    # ranking alone, so making up a specific pairing would be inventing
+    # a recommendation the data doesn't actually support (same reasoning
+    # as removing Key Factors/Risks earlier tonight).
+    #
+    # "6th_starter" IS cleanly derivable -- it's just whichever starter
+    # ranks 6th in the same real, sorted `starters` list already being
+    # returned -- so that one gets fixed to be live instead of removed.
+    sixth_starter = None
+    if len(starters) > 5:
+        s = starters[5]
+        xw = f"{s['xwOBA_against']:.3f}" if s.get("xwOBA_against") else "N/A"
+        sixth_starter = f"{s['name']} — ERA {s.get('ERA','N/A')}, xwOBA {xw}"
+
     return {
         "rotation":      starters,
         "bullpen":       relievers,
-        "closer":        "Matt Brash — 0.60 ERA, promote immediately",
-        "setup":         "Andrés Muñoz — move from closer, fix curveball",
-        "high_leverage": "José Ferrer — xwOBA .242, unlucky, elite",
-        "piggyback":     "Kirby + Miller — limit Kirby to 4 IP, Miller finishes",
-        "6th_starter":   "Luis Castillo — ERA trending down in 6-man role",
+        "6th_starter":   sixth_starter,
     }
 
 
@@ -945,13 +961,10 @@ def print_recommendations(recs):
         xw  = f"{p['xwOBA_against']:.3f}" if p.get("xwOBA_against") else " N/A"
         era = f"{p['ERA']:.2f}" if p.get("ERA") else "N/A"
         print(f"  {i}. {p['name']:<25} ERA {era:>5}  xwOBA {xw}  {p['action']}")
-    print(f"  Piggyback: {rb['piggyback']}")
-    print(f"  6th man:   {rb['6th_starter']}")
+    if rb.get("6th_starter"):
+        print(f"  6th man:   {rb['6th_starter']}")
 
-    print(f"\n── BULLPEN HIERARCHY ──")
-    print(f"  Closer:        {rb['closer']}")
-    print(f"  Setup:         {rb['setup']}")
-    print(f"  High leverage: {rb['high_leverage']}")
+    print(f"\n── BULLPEN (by xwOBA) ──")
     for p in rb.get("bullpen",[])[:6]:
         xw  = f"{p['xwOBA_against']:.3f}" if p.get("xwOBA_against") else " N/A"
         era = f"{p['ERA']:.2f}" if p.get("ERA") else "N/A"

@@ -457,27 +457,36 @@ def analyze_schedule(data: dict) -> dict:
         "flags":           [],
     }
 
-    remaining = _safe_get(data, "schedule", "remaining")
-    if remaining is not None and not remaining.empty:
-        result["games_remaining"] = len(remaining)
+    # BUG FIX 2026-09-01: this used to compute games_remaining as
+    # len(data["schedule"]["remaining"]) alone -- the exact same bug
+    # already found and fixed in simulator.py/monte_carlo.py earlier
+    # tonight: mariners_schedule_scraper.py deliberately splits upcoming
+    # games into next7 (the next 7, for a checklist) and remaining
+    # (everything AFTER those 7), so "remaining" alone always undercounts
+    # the true games left by exactly 7. A real user caught this directly
+    # by comparing the printed "Games left: 8" against the real, actual
+    # 15 games left. It also used the same stale hardcoded bad_teams/
+    # good_teams lists already found and replaced with live data in
+    # output_report.py's schedule coloring (including the same wrong
+    # Houston classification). Rather than fix this a third time as a
+    # separate, independently-maintained implementation -- which is
+    # exactly how this bug went unnoticed through two earlier fix
+    # rounds -- this now just reuses simulator.py's own
+    # compute_schedule_difficulty(), which already correctly combines
+    # next7+remaining and classifies opponents from live standings.
+    from simulator import compute_schedule_difficulty
+    sched = compute_schedule_difficulty(data)
+    result["easy_games"] = sched.get("easy_games", 0)
+    result["hard_games"] = sched.get("hard_games", 0)
+    result["games_remaining"] = (sched.get("easy_games", 0)
+                                 + sched.get("hard_games", 0)
+                                 + sched.get("neutral_games", 0))
 
-        # opponent breakdown
-        bad_teams  = ["LAA","HOU","COL","MIA","DET","KC","BAL","BOS","TOR"]
-        good_teams = ["TBR","NYY","LAD","MIL","CHC","ATL"]
-
-        if "Opp" in remaining.columns:
-            for _, row in remaining.iterrows():
-                opp = str(row.get("Opp",""))
-                if any(t in opp for t in bad_teams):
-                    result["easy_games"] += 1
-                elif any(t in opp for t in good_teams):
-                    result["hard_games"] += 1
-
-        if result["easy_games"] > 40:
-            result["flags"].append(
-                f"{result['easy_games']} games vs sub-.500 teams remaining"
-                f" — favorable schedule"
-            )
+    if result["easy_games"] > 40:
+        result["flags"].append(
+            f"{result['easy_games']} games vs sub-.500 teams remaining"
+            f" — favorable schedule"
+        )
 
     next7 = _safe_get(data, "schedule", "next7")
     if next7 is not None and not next7.empty:
