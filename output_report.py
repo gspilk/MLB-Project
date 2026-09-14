@@ -27,15 +27,8 @@ OUTPUT_DIR  = os.path.join(os.path.dirname(__file__), "output")
 OUTPUT_FILE = os.path.join(OUTPUT_DIR,
     f"mariners_report_{date.today().strftime('%Y%m%d')}.xlsx")
 
-# Append-only snapshot table, one row per report run. This is what powers
-# trend charts (win projection over time, grade over time, etc.) -- the
-# dated Excel files above are point-in-time snapshots that don't stitch
-# together into a trend on their own; this does. Lives under data/, not
-# output/, since it's an accumulating data asset rather than a disposable
-# generated report.
 HISTORY_PATH = os.path.join(os.path.dirname(__file__), "data", "history.parquet")
 
-# ── colors ────────────────────────────────────────────────────────────────────
 NAVY     = "1B2A4A"
 TEAL     = "005C5C"
 GOLD     = "C4A535"
@@ -60,7 +53,6 @@ GRADE_COLORS = {
 }
 
 
-# ── style helpers ─────────────────────────────────────────────────────────────
 def _header(ws, row, col, value, bg=NAVY, fg=WHITE,
             bold=True, size=11, wrap=False):
     cell = ws.cell(row=row, column=col, value=value)
@@ -115,7 +107,6 @@ def _grade_color(grade: str) -> str:
     return GRADE_COLORS.get(grade, GRADE_COLORS.get(base, LGRAY))
 
 
-# ── sheet 1: team summary ─────────────────────────────────────────────────────
 def _sheet_summary(wb: Workbook, d: dict, ou: dict, data: dict = None):
     ws = wb.create_sheet("Team Summary")
     ws.sheet_view.showGridLines = False
@@ -125,7 +116,6 @@ def _sheet_summary(wb: Workbook, d: dict, ou: dict, data: dict = None):
     _title(ws, r, f"SEATTLE MARINERS — MIDSEASON REPORT  |  {date.today()}", 8)
     r += 1
 
-    # overall
     _subtitle(ws, r, "OVERALL GRADE", 8)
     r += 1
     labels = ["Grade", "Verdict", "Record", "Div Rank",
@@ -143,7 +133,6 @@ def _sheet_summary(wb: Workbook, d: dict, ou: dict, data: dict = None):
               color=GREEN if d.get("grade","").startswith("A") else LGRAY)
     r += 2
 
-    # standings
     _subtitle(ws, r, "STANDINGS & LUCK", 8)
     r += 1
     stat_rows = [
@@ -165,7 +154,6 @@ def _sheet_summary(wb: Workbook, d: dict, ou: dict, data: dict = None):
         r += 1
     r += 1
 
-    # team grades
     _subtitle(ws, r, "TEAM GRADES", 8)
     r += 1
     grade_rows = [
@@ -181,7 +169,6 @@ def _sheet_summary(wb: Workbook, d: dict, ou: dict, data: dict = None):
         r += 1
     r += 1
 
-    # outlook
     _subtitle(ws, r, "SEASON OUTLOOK", 8)
     r += 1
     outlook_rows = [
@@ -202,33 +189,11 @@ def _sheet_summary(wb: Workbook, d: dict, ou: dict, data: dict = None):
         r += 1
     r += 1
 
-    # KEY FACTORS and RISKS sections REMOVED 2026-09-01 -- both were
-    # entirely hardcoded sentence lists (see recommender.py's
-    # _season_outlook()), frozen from earlier in the season, and had
-    # since gone actively wrong (not just stale) -- claiming IL returns
-    # for players confirmed active, a bullpen role change already
-    # debunked elsewhere in this project, etc. Removed per instruction
-    # to stop using custom/invented commentary and rely on the real
-    # stats already shown elsewhere in this report instead.
-
     if data is not None:
         _add_game_results_chart(wb, ws, r, data)
 
 
 def _add_game_results_chart(wb: Workbook, ws, start_row: int, data: dict) -> None:
-    """
-    Embeds a real, native Excel line chart showing cumulative win%
-    (games 1 through N on the x-axis, running win% 0-1 on the y-axis)
-    across the season so far.
-
-    Uses data["schedule"]["completed"] rather than the accumulated
-    history.parquet snapshots used in an earlier version of this chart.
-    That matters: history.parquet only has a row for whenever main.py
-    happened to be run, which can have real gaps if it wasn't run every
-    day. The completed game log has NO gaps -- every game actually
-    played shows up, regardless of how often this report gets
-    generated, so the trend it shows is always complete and accurate.
-    """
     from openpyxl.chart import LineChart, Reference
 
     completed = data.get("schedule", {}).get("completed")
@@ -262,15 +227,7 @@ def _add_game_results_chart(wb: Workbook, ws, start_row: int, data: dict) -> Non
     chart = LineChart()
     chart.title = "Cumulative Win % Over the Season"
     chart.style = 2
-    chart.varyColors = False  # this was the real bug (confirmed in real
-                              # Excel, not just a previewer artifact) --
-                              # style 2 defaults to "vary colors by
-                              # point," which cycles a line chart's
-                              # color segment-by-segment across the
-                              # theme palette instead of keeping one
-                              # consistent color for the single series,
-                              # producing what looked like several
-                              # overlapping different-colored lines
+    chart.varyColors = False
     chart.y_axis.title = "Win %"
     chart.x_axis.title = "Game #"
     chart.y_axis.scaling.min = 0
@@ -279,13 +236,10 @@ def _add_game_results_chart(wb: Workbook, ws, start_row: int, data: dict) -> Non
     chart.width = 20
     chart.legend = None
 
-    # explicitly force axis lines, tick marks, and tick labels ON
     for axis in (chart.x_axis, chart.y_axis):
         axis.delete = False
         axis.majorTickMark = "out"
         axis.tickLblPos = "nextTo"
-    # avoid an unreadable wall of 135 game-number labels crammed onto
-    # the x-axis -- show one roughly every 10 games instead
     chart.x_axis.tickLblSkip = 10
     chart.x_axis.tickMarkSkip = 10
 
@@ -294,19 +248,13 @@ def _add_game_results_chart(wb: Workbook, ws, start_row: int, data: dict) -> Non
     categories = Reference(ws, min_col=1, min_row=data_start_row, max_row=data_end_row)
     chart.set_categories(categories)
 
-    # belt-and-suspenders on top of varyColors=False above -- explicitly
-    # pin the single series to one solid color so there's no ambiguity
-    # left for Excel to fill in on its own
     chart.series[0].graphicalProperties.line.solidFill = "1F77B4"
-    chart.series[0].graphicalProperties.line.width = 20000  # EMUs, ~1.5pt
+    chart.series[0].graphicalProperties.line.width = 20000
 
     anchor_col = get_column_letter(3)
     ws.add_chart(chart, f"{anchor_col}{start_row}")
 
 
-
-
-# ── sheet 2: player grades ────────────────────────────────────────────────────
 def _sheet_grades(wb: Workbook, grades: dict):
     ws = wb.create_sheet("Player Grades")
     ws.sheet_view.showGridLines = False
@@ -315,7 +263,6 @@ def _sheet_grades(wb: Workbook, grades: dict):
     _title(ws, r, "PLAYER GRADES", 10)
     r += 1
 
-    # batters
     _subtitle(ws, r, "BATTERS", 10)
     r += 1
     bat_headers = ["Name","Grade","Role","PA","OPS","xwOBA",
@@ -346,7 +293,6 @@ def _sheet_grades(wb: Workbook, grades: dict):
         r += 1
 
     r += 1
-    # pitchers
     _subtitle(ws, r, "PITCHERS", 10)
     r += 1
     pit_headers = ["Name","Role","Grade","IP","ERA","WHIP",
@@ -378,7 +324,6 @@ def _sheet_grades(wb: Workbook, grades: dict):
         r += 1
 
 
-# ── sheet 3: statcast ─────────────────────────────────────────────────────────
 def _sheet_statcast(wb: Workbook, data: dict):
     ws = wb.create_sheet("Statcast")
     ws.sheet_view.showGridLines = False
@@ -388,7 +333,6 @@ def _sheet_statcast(wb: Workbook, data: dict):
     _title(ws, r, "STATCAST ANALYSIS", 9)
     r += 1
 
-    # batters
     _subtitle(ws, r, "BATTER STATCAST", 9)
     r += 1
     headers = ["Name","PA","wOBA","xwOBA","Luck","Barrel%","HardHit%","EV50","K%"]
@@ -419,7 +363,6 @@ def _sheet_statcast(wb: Workbook, data: dict):
             r += 1
 
     r += 1
-    # pitchers
     _subtitle(ws, r, "PITCHER STATCAST", 9)
     r += 1
     pit_headers = ["Name","BF","wOBA vs","xwOBA vs","Luck","K%","Whiff%","HardHit% vs","Barrel% vs"]
@@ -453,7 +396,6 @@ def _sheet_statcast(wb: Workbook, data: dict):
             r += 1
 
 
-# ── sheet 4: stats to improve ─────────────────────────────────────────────────
 def _sheet_stats(wb: Workbook, stats: list):
     ws = wb.create_sheet("Stats to Improve")
     ws.sheet_view.showGridLines = False
@@ -486,7 +428,6 @@ def _sheet_stats(wb: Workbook, stats: list):
         r += 1
 
 
-# ── sheet 5: roster moves ─────────────────────────────────────────────────────
 def _sheet_moves(wb: Workbook, im: list, dl: dict):
     ws = wb.create_sheet("Roster Moves")
     ws.sheet_view.showGridLines = False
@@ -496,7 +437,6 @@ def _sheet_moves(wb: Workbook, im: list, dl: dict):
     _title(ws, r, "ROSTER MOVES", 4)
     r += 1
 
-    # immediate
     _subtitle(ws, r, "IMMEDIATE MOVES", 4)
     r += 1
     for i, h in enumerate(["Urgency","Type","Player","Reason"], 1):
@@ -517,7 +457,6 @@ def _sheet_moves(wb: Workbook, im: list, dl: dict):
         r += 1
 
     r += 1
-    # deadline
     _subtitle(ws, r, "DEADLINE STRATEGY", 4)
     r += 1
     ws.merge_cells(start_row=r, start_column=1,
@@ -529,7 +468,6 @@ def _sheet_moves(wb: Workbook, im: list, dl: dict):
     ws.row_dimensions[r].height = 40
     r += 2
 
-    # targets
     _subtitle(ws, r, "DEADLINE TARGETS", 4, bg=TEAL)
     r += 1
     for t in dl.get("targets", []):
@@ -551,7 +489,6 @@ def _sheet_moves(wb: Workbook, im: list, dl: dict):
             r += 1
         r += 1
 
-    # do not trade
     _subtitle(ws, r, "DO NOT TRADE", 4, bg="8B0000")
     r += 1
     for p in dl.get("do_not_trade", []):
@@ -564,7 +501,6 @@ def _sheet_moves(wb: Workbook, im: list, dl: dict):
         r += 1
 
     r += 1
-    # sell candidates
     if dl.get("sell"):
         _subtitle(ws, r, "SELL CANDIDATES", 4, bg=GOLD)
         r += 1
@@ -581,7 +517,6 @@ def _sheet_moves(wb: Workbook, im: list, dl: dict):
             r += 1
 
 
-# ── sheet 6: schedule ─────────────────────────────────────────────────────────
 def _sheet_schedule(wb: Workbook, data: dict):
     ws = wb.create_sheet("Schedule")
     ws.sheet_view.showGridLines = False
@@ -591,7 +526,6 @@ def _sheet_schedule(wb: Workbook, data: dict):
     _title(ws, r, "SCHEDULE", 8)
     r += 1
 
-    # next 7
     _subtitle(ws, r, "NEXT 7 GAMES", 8)
     r += 1
     for i, h in enumerate(["#","Date","H/A","Opponent",
@@ -616,7 +550,6 @@ def _sheet_schedule(wb: Workbook, data: dict):
             r += 1
 
     r += 1
-    # remaining
     _subtitle(ws, r, "REMAINING SCHEDULE", 8)
     r += 1
     for i, h in enumerate(["#","Date","H/A","Opponent",
@@ -645,8 +578,6 @@ def _sheet_schedule(wb: Workbook, data: dict):
             r += 1
 
 
-
-# ── sheet 7: player targets ───────────────────────────────────────────────────
 def _sheet_targets(wb: Workbook, targets: dict):
     ws = wb.create_sheet("Trade Targets")
     ws.sheet_view.showGridLines = False
@@ -655,7 +586,6 @@ def _sheet_targets(wb: Workbook, targets: dict):
     _title(ws, r, "MLB TRADE & WAIVER TARGETS", 9)
     r += 1
 
-    # batter targets
     _subtitle(ws, r, "1B/DH TARGETS — xwOBA .330+, Barrel% 8%+, non-contender", 9)
     r += 1
     bat_h = ["Name","Team","PA","xwOBA","Barrel%","HardHit%","HR","OPS","Fit"]
@@ -681,7 +611,6 @@ def _sheet_targets(wb: Workbook, targets: dict):
         r += 1
 
     r += 1
-    # pitcher targets
     _subtitle(ws, r, "BULLPEN TARGETS — xwOBA against ≤.310, 20+ IP, non-contender", 9)
     r += 1
     pit_h = ["Name","Team","G","IP","ERA","WHIP","K%","xwOBA vs","Fit"]
@@ -705,19 +634,12 @@ def _sheet_targets(wb: Workbook, targets: dict):
         _cell(ws, r, 9, p.get("fit",""), color=color)
         r += 1
 
-# ── sheet: simulation ─────────────────────────────────────────────────────────
 def _sheet_simulation(wb, scenarios: dict, data: dict = None):
     from simulator import project_division, compute_rival_projections
     ws = wb.create_sheet("Deadline Simulation")
     ws.sheet_view.showGridLines = False
     _set_col_widths(ws, [48, 7, 7, 7, 8, 10, 25])
 
-    # BUG FIX 2026-09-01: this sheet builder was calling project_division()
-    # with no rival_projections argument at all, silently falling back to
-    # stale hardcoded TEX/HOU estimates every single run (12 warnings per
-    # report) even though live rival projections were already correctly
-    # wired into main.py's console output. Compute the same live values
-    # here too instead of accepting the stale fallback by default.
     rival_projections = compute_rival_projections(data) if data is not None else None
 
     r = 1
@@ -749,14 +671,13 @@ def _sheet_simulation(wb, scenarios: dict, data: dict = None):
         _cell(ws, r, 2, s["rs_g"],      color=color, align="center", fmt="0.00")
         _cell(ws, r, 3, s["ra_g"],      color=color, align="center", fmt="0.00")
         _cell(ws, r, 4, s["win_pct"],   color=color, align="center", fmt="0.000")
-        _cell(ws, r, 5, s["proj_wins"], color=color, align="center")
-        _cell(ws, r, 6, f"{s['final_w']}-{s['final_l']}", color=color, align="center")
+        _cell(ws, r, 5, s["proj_wins"], color=color, align="center", fmt="0.0")
+        _cell(ws, r, 6, f"{round(s['final_w']):.0f}-{round(s['final_l']):.0f}", color=color, align="center")
         _cell(ws, r, 7, pos,            color=color)
         r += 1
 
     r += 1
 
-    # detail each scenario
     for key, s in scenarios.items():
         div = project_division(s["final_w"], rival_projections)
         _subtitle(ws, r, s["name"].upper(), 7, bg=TEAL)
@@ -767,10 +688,10 @@ def _sheet_simulation(wb, scenarios: dict, data: dict = None):
             ("RA/G",      s["ra_g"]),
             ("Win%",      s["win_pct"]),
             ("Luck wins", s["luck_wins"]),
-            ("Final W-L", f"{s['final_w']}-{s['final_l']}"),
+            ("Final W-L", f"{round(s['final_w']):.0f}-{round(s['final_l']):.0f}"),
             ("Playoff",   div["playoff_position"]),
-            ("vs TEX",    f"{div['gap_to_tex']:+d} games"),
-            ("vs HOU",    f"{div['games_ahead_hou']:+d} games"),
+            ("vs TEX",    f"{div['gap_to_tex']:+.0f} games"),
+            ("vs HOU",    f"{div['games_ahead_hou']:+.0f} games"),
         ]:
             _cell(ws, r, 1, label, bold=True, color=LGRAY)
             ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=7)
@@ -798,13 +719,7 @@ def _sheet_simulation(wb, scenarios: dict, data: dict = None):
         r += 1
 
 
-# ── main generate function ────────────────────────────────────────────────────
 def _append_history_row(d: dict, ou: dict) -> None:
-    """
-    Appends one snapshot row to data/history.parquet each time a report is
-    generated. Re-running on the same date replaces that day's row instead
-    of duplicating it, so you can re-run mid-day without corrupting trends.
-    """
     row = {
         "date":               date.today().isoformat(),
         "record":             d.get("record"),
@@ -832,8 +747,6 @@ def _append_history_row(d: dict, ou: dict) -> None:
     if os.path.exists(HISTORY_PATH):
         try:
             history = pd.read_parquet(HISTORY_PATH)
-            # drop any existing row for today so a same-day re-run updates
-            # in place instead of appending a duplicate snapshot
             history = history[history["date"] != row["date"]]
             history = pd.concat([history, new_row], ignore_index=True)
         except Exception as e:
@@ -852,32 +765,17 @@ def generate_report(data: dict, analysis: dict,
                     grades: dict, recs: dict,
                     scenarios: dict = None,
                     output_path: str = None) -> str:
-    """
-    Generates the Excel report.
-    Returns path to the saved file.
-    """
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     path = output_path or OUTPUT_FILE
 
     print(f"\n[report] Generating Excel report...")
 
     wb = Workbook()
-    wb.remove(wb.active)  # remove default sheet
+    wb.remove(wb.active)
 
     d  = recs["diagnosis"]
     ou = recs["outlook"]
     si = recs["stats_to_improve"]
-
-    # REMOVED 2026-09-01: "Roster Moves" sheet (immediate moves + deadline
-    # strategy + DO NOT TRADE + SELL CANDIDATES) taken out entirely. It's
-    # now a month past the real Aug 3 trade deadline, and this section had
-    # gone from just stale to actively wrong -- e.g. still listing Luis
-    # Castillo as a "sell candidate" over a month after he was actually
-    # traded away, plus hardcoded contract figures in DO NOT TRADE that
-    # were never real data to begin with (same issue already fixed
-    # elsewhere in player_grades.py). recs["immediate_moves"] and
-    # recs["deadline"] are still computed by recommender.py in case
-    # something else needs them later, just no longer rendered here.
 
     _sheet_summary(wb, d, ou, data)
     _sheet_grades(wb, grades)
@@ -896,7 +794,6 @@ def generate_report(data: dict, analysis: dict,
     return path
 
 
-# ── test ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     from data_builder import build_all
     from team_analyzer import analyze_team

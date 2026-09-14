@@ -367,8 +367,22 @@ def _pythagorean_winpct(rs_g: float, ra_g: float,
 
 
 def _project_games(win_pct: float,
-                   schedule: dict = SCHEDULE) -> int:
-    """Project wins over remaining schedule."""
+                   schedule: dict = SCHEDULE) -> float:
+    """
+    Project wins over remaining schedule.
+
+    BUG FIX: this used to round() to a whole integer immediately,
+    which becomes a real problem any time GAMES_REMAINING gets small
+    (deep in the stretch run) -- a small enough remaining-game count
+    means genuinely different scenario win% values can round to the
+    exact same integer win count, silently erasing real differences
+    between scenarios. Caught directly when this happened: every
+    single scenario in the simulator showed an identical "Proj W",
+    making the whole comparison look pointless even though the real
+    underlying numbers differed. Returns the real, precise float now;
+    round only at the final print step, not here where it gets used
+    for every downstream calculation.
+    """
     easy    = schedule["easy_games"]    * schedule["easy_winpct"]
     hard    = schedule["hard_games"]    * schedule["hard_winpct"]
     neutral = schedule["neutral_games"] * schedule["neutral_winpct"]
@@ -377,7 +391,7 @@ def _project_games(win_pct: float,
     base_wpct  = base_wins / GAMES_REMAINING
     # weight team quality 60%, schedule 40%
     blended    = (win_pct * 0.60) + (base_wpct * 0.40)
-    return round(GAMES_REMAINING * blended)
+    return GAMES_REMAINING * blended
 
 
 def _luck_correction(luck: float, games_remaining: int) -> float:
@@ -495,16 +509,30 @@ def _build_scenario(name: str,
         })
 
     # -- luck correction --
+    # BUG FIX: this only ever corrected NEGATIVE luck (unlucky team ->
+    # expect improvement), silently skipping any adjustment at all when
+    # luck was positive. A real, complete regression-to-the-mean
+    # correction cuts both ways -- a team playing ABOVE its real
+    # underlying skill (positive luck) should also expect some of that
+    # cushion to fade, not just get a free pass. Caught directly on a
+    # day the team's real luck happened to be positive: every scenario
+    # was silently applying zero luck adjustment at all, making the
+    # simulator systematically too optimistic any time the team is
+    # running hot, not just when it's running cold. Now applies the
+    # same 50%-regression logic in both directions.
     luck_wins = 0
-    if include_luck and CURRENT_LUCK < 0:
-        luck_correction = -CURRENT_LUCK * 0.50  # half corrects
+    if include_luck and CURRENT_LUCK != 0:
+        luck_correction = -CURRENT_LUCK * 0.50  # half corrects either way
         luck_wins       = round(luck_correction)
+        direction = "unlucky, expect improvement" if CURRENT_LUCK < 0 else \
+                   "lucky, expect some regression"
         impacts.append({
             "source": "Luck correction",
             "rs":     0,
             "ra":     0,
             "games":  0,
-            "note":   f"Luck {CURRENT_LUCK} - ~{luck_wins} free wins",
+            "note":   f"Luck {CURRENT_LUCK} ({direction}) - "
+                     f"~{luck_wins:+d} wins",
         })
 
     # -- project --
@@ -751,10 +779,17 @@ def print_simulation(scenarios: dict, rival_projections: dict = None):
 
     for key, s in scenarios.items():
         div = project_division(s["final_w"], rival_projections)
+        # BUG FIX: proj_wins/final_w are now real floats (see
+        # _project_games() fix) rather than pre-rounded integers, so
+        # scenarios that genuinely differ show that difference here
+        # instead of all collapsing to the same displayed number.
+        # Final record still rounds to a whole number for display --
+        # a real record can't be fractional -- but Proj W keeps one
+        # decimal so the underlying scenarios stay distinguishable.
         print(f"  {s['name'][:44]:<45} "
               f"{s['rs_g']:>5.2f} {s['ra_g']:>5.2f} "
-              f"{s['win_pct']:>5.3f} {s['proj_wins']:>6} "
-              f"{s['final_w']}-{s['final_l']:>2}  "
+              f"{s['win_pct']:>5.3f} {s['proj_wins']:>6.1f} "
+              f"{round(s['final_w']):.0f}-{round(s['final_l']):>2.0f}  "
               f"{div['playoff_position']}")
 
     # detail each scenario
@@ -762,13 +797,13 @@ def print_simulation(scenarios: dict, rival_projections: dict = None):
         print(f"\n-- {s['name'].upper()} --")
         print(f"  RS/G: {s['rs_g']}  RA/G: {s['ra_g']}  "
               f"Win%: {s['win_pct']}  Luck wins: {s['luck_wins']}")
-        print(f"  Projected: {s['final_w']}-{s['final_l']}  "
+        print(f"  Projected: {round(s['final_w']):.0f}-{round(s['final_l']):.0f}  "
               f"({s['final_wpct']} win%)")
 
         div = project_division(s["final_w"], rival_projections)
         print(f"  Playoff: {div['playoff_position']}")
-        print(f"  vs TEX:  {div['gap_to_tex']:+d} games")
-        print(f"  vs HOU:  {div['games_ahead_hou']:+d} games")
+        print(f"  vs TEX:  {div['gap_to_tex']:+.0f} games")
+        print(f"  vs HOU:  {div['games_ahead_hou']:+.0f} games")
 
         if s["impacts"]:
             print(f"  Factors:")
