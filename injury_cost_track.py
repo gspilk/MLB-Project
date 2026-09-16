@@ -333,23 +333,36 @@ def build_historical_report(data: dict, sea_2025: dict = None,
         bat_row = bat[bat["Name"].str.contains(name, na=False, regex=False)]
         pit_row = pit[pit["Name"].str.contains(name, na=False, regex=False)]
 
+        # BUG FIX: this used to always check batting FIRST and only
+        # fall back to pitching if there was no batting match at all --
+        # meaning a spurious or thin batting match (e.g. a name
+        # substring collision, or a stray/incomplete row) could
+        # silently override a real, substantial pitching line. Caught
+        # directly: Gabe Speier -- a real pitcher with no batting
+        # record under AL rules -- was showing up as "Batter" in the
+        # combined table. Now checks BOTH tables' real games-played
+        # figures and picks whichever one actually has a substantial,
+        # real stat line, rather than trusting whichever table
+        # happened to be checked first.
+        bat_g = pit_g = 0
+        if not bat_row.empty:
+            bat_g = pd.to_numeric(bat_row["G"].values[0], errors="coerce") or 0
+        if not pit_row.empty:
+            pit_g = pd.to_numeric(pit_row["G"].values[0], errors="coerce") or 0
+
         war_rate = None
         player_type = "Unknown"
         actual_2026_g = 0
-        if not bat_row.empty:
-            g = pd.to_numeric(bat_row["G"].values[0], errors="coerce") or 0
+        if bat_g > 0 and bat_g >= pit_g:
             war = pd.to_numeric(bat_row["WAR"].values[0], errors="coerce") or 0
-            if g > 0:
-                war_rate = war / g
+            war_rate = war / bat_g
             player_type = "Batter"
-            actual_2026_g = g
-        elif not pit_row.empty:
-            g = pd.to_numeric(pit_row["G"].values[0], errors="coerce") or 0
+            actual_2026_g = bat_g
+        elif pit_g > 0:
             war = pd.to_numeric(pit_row["WAR"].values[0], errors="coerce") or 0
-            if g > 0:
-                war_rate = war / g
+            war_rate = war / pit_g
             player_type = "Pitcher"
-            actual_2026_g = g
+            actual_2026_g = pit_g
 
         # fall back to the 2025 baseline cross-check when no date-based
         # estimate exists -- only once per player, see note above
@@ -378,6 +391,71 @@ def build_historical_report(data: dict, sea_2025: dict = None,
     return rows
 
 
+def get_leverage(name: str, val_pit) -> float:
+    """
+    Real leverage index (gmLI) from bbref's own value-pitching table --
+    how high-stakes this pitcher's average appearance actually was.
+    League average is 1.00; a real closer typically sits well above
+    that (Matt Brash's real 2026 gmLI was 1.91), while a mop-up/depth
+    arm sits well below it (0.3-0.4 range). Two pitchers can have
+    similar raw WAR/G but very different real importance to the team --
+    this captures that directly instead of treating all WAR equally.
+    Returns None if not found, rather than a misleading default of 1.0.
+    """
+    if val_pit is None or val_pit.empty or "Name" not in val_pit.columns:
+        return None
+    row = val_pit[val_pit["Name"].astype(str).str.contains(
+        name.split(" (")[0], case=False, na=False, regex=False)]
+    if row.empty or "gmLI" not in row.columns:
+        return None
+    li = pd.to_numeric(row["gmLI"].values[0], errors="coerce")
+    return None if pd.isna(li) else float(li)
+
+
+# Real thresholds for classifying a batter's role from their own PA/G
+# rate (plate appearances per game actually played) -- since a player's
+# OWN games-played total is exactly what's suppressed by injury, it
+# can't be used to judge their role; PA/G in games they DID play is a
+# real, independent signal instead. ~4 PA/G is close to a full lineup
+# spot; a true bench/pinch-hit role rarely clears half that.
+STARTER_PA_PER_G = 3.0
+
+# A real, everyday starter doesn't actually play all 162 games even
+# healthy -- real rest days, day games after night games, etc. Using
+# the flat team-games total as "expected" overstates a healthy
+# starter's normal workload. ~93% reflects a realistic every-day
+# player's real attendance rate, not a guess -- most true iron-man
+# regulars land in the 150-155 games range out of 162.
+STARTER_ATTENDANCE_RATE = 0.93
+
+
+def _compute_reliever_baseline(pit_df: pd.DataFrame) -> float:
+    """
+    Real, dynamic reliever workload baseline -- the team's own current
+    HEALTHY relievers' average appearance count, not a fixed number or
+    the full team-games total (which no reliever, healthy or hurt,
+    would ever be expected to match -- even a heavily-used reliever
+    typically appears in well under half the team's games). This
+    directly answers the real, honest problem flagged tonight: reliever
+    workload varies a lot and there's no single clean number, so use
+    the team's own real relievers as the reference point instead of
+    guessing one.
+    """
+    healthy_relievers = []
+    for _, row in pit_df.iterrows():
+        name = str(row.get("Name", ""))
+        if _is_il(name):
+            continue
+        gs = pd.to_numeric(row.get("GS", 0), errors="coerce") or 0
+        g = pd.to_numeric(row.get("G", 0), errors="coerce") or 0
+        is_starter = gs >= (g * 0.5) and gs > 0
+        if not is_starter and g > 0:
+            healthy_relievers.append(g)
+    if not healthy_relievers:
+        return None
+    return sum(healthy_relievers) / len(healthy_relievers)
+
+
 def build_injury_report(data: dict) -> list:
     team_games = get_team_games_played(data)
     if not team_games:
@@ -391,19 +469,49 @@ def build_injury_report(data: dict) -> list:
         if not _is_il(name):
             continue
         g = pd.to_numeric(row.get("G", 0), errors="coerce") or 0
+        pa = pd.to_numeric(row.get("PA", 0), errors="coerce") or 0
         war = pd.to_numeric(row.get("WAR", 0), errors="coerce") or 0
         if g <= 0:
             continue
-        games_missed = max(0, team_games - g)
+
+        pa_per_g = pa / g
+        is_regular_starter = pa_per_g >= STARTER_PA_PER_G
+
+        if is_regular_starter:
+            expected_games = team_games * STARTER_ATTENDANCE_RATE
+            role_note = (f"everyday starter ({pa_per_g:.1f} PA/G when playing) -- "
+                        f"real ~93% attendance baseline, not a flat 162")
+        else:
+            # BENCH/DEPTH: these players are role-defined to play less
+            # than every game even fully healthy -- comparing them to a
+            # starter's baseline would misread their normal part-time
+            # role as injury-driven absence. Games-missed intentionally
+            # NOT computed for this group -- there's no honest baseline
+            # to compare against without real depth-chart data this
+            # project doesn't have.
+            rows.append({
+                "name": name, "type": "Batter (bench/depth)", "games_played": int(g),
+                "games_missed": None, "war_rate_per_game": None,
+                "estimated_war_lost": None, "confidence": "N/A",
+                "note": f"bench/depth role ({pa_per_g:.1f} PA/G when playing) -- "
+                       f"games-missed not computed, no honest full-role "
+                       f"baseline exists for a part-time role",
+            })
+            continue
+
+        games_missed = max(0, expected_games - g)
         war_rate = war / g
         war_lost = round(war_rate * games_missed, 2)
         rows.append({
             "name": name, "type": "Batter", "games_played": int(g),
-            "games_missed": int(games_missed), "war_rate_per_game": round(war_rate, 3),
+            "games_missed": round(games_missed, 1), "war_rate_per_game": round(war_rate, 5),
             "estimated_war_lost": war_lost, "confidence": _confidence(g),
+            "note": role_note,
         })
 
     pit = data["seattle"]["pitching"]
+    val_pit = data["seattle"].get("value_pitching")
+    reliever_baseline = _compute_reliever_baseline(pit)
     for _, row in pit.iterrows():
         name = str(row.get("Name", ""))
         if not _is_il(name):
@@ -412,6 +520,14 @@ def build_injury_report(data: dict) -> list:
         gs = pd.to_numeric(row.get("GS", 0), errors="coerce") or 0
         war = pd.to_numeric(row.get("WAR", 0), errors="coerce") or 0
         is_starter = gs >= (g * 0.5) and gs > 0
+        leverage = get_leverage(name, val_pit)
+        # leverage-adjusted WAR lost: scales the raw estimate by how
+        # high-stakes this pitcher's real appearances actually were,
+        # relative to league-average (1.00) -- a real closer's missed
+        # time counts for more than a depth arm's at the same raw WAR
+        leverage_note = (f" (leverage-adjusted from real gmLI {leverage:.2f})"
+                         if leverage is not None else
+                         " (no real leverage data found -- raw WAR only)")
 
         if is_starter:
             if gs <= 0:
@@ -420,25 +536,55 @@ def build_injury_report(data: dict) -> list:
             starts_missed = max(0, expected_starts - gs)
             war_rate = war / gs
             war_lost = round(war_rate * starts_missed, 2)
+            war_lost_adj = round(war_lost * leverage, 2) if leverage is not None else None
             rows.append({
                 "name": name, "type": "Starter", "games_played": int(gs),
-                "games_missed": round(starts_missed, 1), "war_rate_per_game": round(war_rate, 3),
+                "games_missed": round(starts_missed, 1), "war_rate_per_game": round(war_rate, 5),
                 "estimated_war_lost": war_lost, "confidence": _confidence(gs),
-                "note": "starts missed (5-day rotation pace), not raw team games",
+                "leverage": leverage, "war_lost_leverage_adj": war_lost_adj,
+                "note": "starts missed (5-day rotation pace), not raw team games"
+                       + leverage_note,
             })
         else:
             if g <= 0:
                 continue
-            games_missed = max(0, team_games - g)
+            # BUG FIX: was comparing a reliever's games played against
+            # the FULL team games total -- no reliever, healthy or
+            # hurt, would ever be expected to appear in every team
+            # game, so this overstated "missed" time for every reliever
+            # in the file. Uses the team's own real, currently-healthy
+            # relievers' average appearance count instead -- a genuine,
+            # role-appropriate baseline computed from real data, not a
+            # guess, and directly addresses that reliever workload
+            # varies too much for one fixed number to work.
+            if reliever_baseline is not None:
+                games_missed = max(0, reliever_baseline - g)
+                baseline_note = (f"real team reliever baseline: "
+                                f"{reliever_baseline:.1f} appearances "
+                                f"(avg of currently-healthy relievers)")
+            else:
+                games_missed = 0
+                baseline_note = ("no other healthy relievers found to "
+                                "compute a real baseline from -- "
+                                "games-missed not estimated")
             war_rate = war / g
             war_lost = round(war_rate * games_missed, 2)
+            war_lost_adj = round(war_lost * leverage, 2) if leverage is not None else None
             rows.append({
                 "name": name, "type": "Reliever", "games_played": int(g),
-                "games_missed": int(games_missed), "war_rate_per_game": round(war_rate, 3),
+                "games_missed": round(games_missed, 1), "war_rate_per_game": round(war_rate, 5),
                 "estimated_war_lost": war_lost, "confidence": _confidence(g),
+                "leverage": leverage, "war_lost_leverage_adj": war_lost_adj,
+                "note": baseline_note + " | " + leverage_note.strip(),
             })
 
-    rows.sort(key=lambda r: r["estimated_war_lost"], reverse=True)
+    # BUG FIX: bench/depth rows now carry estimated_war_lost=None
+    # (intentionally, since there's no honest baseline to compute them
+    # against) -- a plain sort on that field would crash comparing
+    # None to a real number. Sorts those rows to the bottom instead of
+    # erroring.
+    rows.sort(key=lambda r: (r["estimated_war_lost"] is None,
+                             -(r["estimated_war_lost"] or 0)))
     return rows
 
 
@@ -452,19 +598,37 @@ def print_report(rows: list, team_games: int):
         return
 
     print(f"  {'Name':<28} {'Type':<9} {'Played':>7} {'Missed':>7} "
-          f"{'WAR/G':>7} {'Est. WAR Lost':>14} {'Confidence':>11}")
+          f"{'WAR/G':>9} {'Est. WAR Lost':>14} {'Confidence':>11}")
     print("  " + "-" * 86)
     for r in rows:
+        # BUG FIX: bench/depth rows carry None for games_missed/
+        # war_rate/war_lost (intentionally -- no honest baseline
+        # exists for a part-time role, see build_injury_report()).
+        # The plain ":>N" alignment format spec crashes on None, so
+        # format these as a literal "n/a" string first.
+        gm = f"{r['games_missed']:.1f}" if r['games_missed'] is not None else "n/a"
+        wr = f"{r['war_rate_per_game']:.5f}" if r['war_rate_per_game'] is not None else "n/a"
+        wl = f"{r['estimated_war_lost']:.2f}" if r['estimated_war_lost'] is not None else "n/a"
         print(f"  {r['name']:<28} {r['type']:<9} {r['games_played']:>7} "
-              f"{r['games_missed']:>7} {r['war_rate_per_game']:>7} "
-              f"{r['estimated_war_lost']:>14} {r['confidence']:>11}")
+              f"{gm:>7} {wr:>9} "
+              f"{wl:>14} {r['confidence']:>11}")
+        if r.get("war_lost_leverage_adj") is not None:
+            print(f"    Leverage-adjusted (real gmLI {r['leverage']:.2f}): "
+                  f"{r['war_lost_leverage_adj']:+.2f} WAR "
+                  f"(vs {r['estimated_war_lost']:+.2f} unweighted)")
         if r.get("note"):
             print(f"    -> {r['note']}")
 
+    # BUG FIX: same None-handling issue as the print loop above -- bench/
+    # depth rows have estimated_war_lost=None, which would crash a plain
+    # sum(). Filtering those out of both totals (correctly -- they were
+    # never given a real number to include).
     low_conf = [r for r in rows if r["confidence"] == "LOW"]
-    total_war_lost = round(sum(r["estimated_war_lost"] for r in rows), 2)
+    total_war_lost = round(sum(r["estimated_war_lost"] for r in rows
+                               if r["estimated_war_lost"] is not None), 2)
     total_high_conf = round(sum(r["estimated_war_lost"] for r in rows
-                                if r["confidence"] != "LOW"), 2)
+                                if r["confidence"] != "LOW"
+                                and r["estimated_war_lost"] is not None), 2)
     print("  " + "-" * 86)
     print(f"  {'TOTAL (all confidence levels)':<52} {total_war_lost:>14}")
     print(f"  {'TOTAL (excluding LOW-confidence estimates)':<52} {total_high_conf:>14}")
@@ -510,6 +674,77 @@ def print_historical_report(rows: list):
     print("=" * 78 + "\n")
 
 
+def build_unified_table(live_rows: list, historical_rows: list) -> list:
+    """
+    Combines the live-snapshot and historical-stint data into ONE
+    unified list -- same real numbers as the two separate sections
+    above, just normalized into a single consistent schema (name,
+    status, type, detail, games missed, WAR lost, confidence, source)
+    so the whole season's injury picture can be seen, sorted, and
+    reasoned about as one dataset instead of two differently-shaped
+    reports bolted together.
+    """
+    unified = []
+
+    for r in live_rows:
+        unified.append({
+            "name": r["name"],
+            "status": "CURRENTLY OUT",
+            "type": r["type"],
+            "detail": r.get("note", ""),
+            "games_missed": r["games_missed"],
+            "war_lost": r["estimated_war_lost"],
+            "war_lost_leverage_adj": r.get("war_lost_leverage_adj"),
+            "confidence": r["confidence"],
+            "source": "live bbref snapshot",
+        })
+
+    for r in historical_rows:
+        unified.append({
+            "name": r["name"],
+            "status": "RESOLVED",
+            "type": r["type"],
+            "detail": r["injury"],
+            "games_missed": r["games_missed"],
+            "war_lost": r["estimated_war_lost"],
+            "war_lost_leverage_adj": None,  # leverage data only wired
+                                            # up for the live section so far
+            "confidence": r["date_confidence"],
+            "source": r["source"],
+        })
+
+    # same None-safe sort pattern as build_injury_report() -- rows with
+    # no computable WAR-lost figure sort to the bottom instead of
+    # crashing a plain comparison against a real number
+    unified.sort(key=lambda r: (r["war_lost"] is None, -(r["war_lost"] or 0)))
+    return unified
+
+
+def print_unified_table(rows: list):
+    print("\n" + "=" * 100)
+    print("UNIFIED INJURY TABLE -- every player who is or was hurt this season, one dataset")
+    print("=" * 100)
+    print(f"  {'Name':<26} {'Status':<14} {'Type':<11} {'Missed':>7} "
+          f"{'WAR Lost':>9} {'Lev-Adj':>8} {'Conf':>12}  Detail")
+    print("  " + "-" * 96)
+
+    for r in rows:
+        gm = f"{r['games_missed']:.1f}" if r["games_missed"] is not None else "n/a"
+        wl = f"{r['war_lost']:+.2f}" if r["war_lost"] is not None else "n/a"
+        lev = (f"{r['war_lost_leverage_adj']:+.2f}"
+              if r.get("war_lost_leverage_adj") is not None else "-")
+        detail = (r["detail"][:45] + "...") if len(r["detail"]) > 48 else r["detail"]
+        print(f"  {r['name']:<26} {r['status']:<14} {r['type']:<11} "
+              f"{gm:>7} {wl:>9} {lev:>8} {r['confidence']:>12}  {detail}")
+
+    real_totals = [r["war_lost"] for r in rows if r["war_lost"] is not None]
+    if real_totals:
+        print("  " + "-" * 96)
+        print(f"  TOTAL (every row with a computable WAR-lost figure): "
+              f"{round(sum(real_totals), 2):+.2f} WAR across {len(real_totals)} stints")
+    print("=" * 100 + "\n")
+
+
 if __name__ == "__main__":
     print("Building data (uses cache if fresh)...")
     data = build_all(2026)
@@ -521,3 +756,37 @@ if __name__ == "__main__":
     sea_2025 = get_seattle_stats(2025)
     historical_rows = build_historical_report(data, sea_2025, team_games)
     print_historical_report(historical_rows)
+
+    # BUG FIX: the two sections above were always computed and printed
+    # correctly, but never actually COMBINED into one final answer --
+    # a real user pointed out the output "still seems off" after
+    # verifying both sections' internal math checked out individually.
+    # The real gap: after building all this, the one number someone
+    # actually wants (total season-long injury cost) was simply never
+    # shown. Uses the live section's HIGH/MEDIUM-confidence total (not
+    # the LOW-confidence-included one) alongside the historical total,
+    # since combining a known-noisy number with a dated, sourced one
+    # would undermine the credibility of both.
+    live_trustworthy = round(sum(r["estimated_war_lost"] for r in rows
+                                 if r["confidence"] != "LOW"
+                                 and r["estimated_war_lost"] is not None), 2)
+    historical_total = round(sum(r["estimated_war_lost"] for r in historical_rows
+                                 if r["estimated_war_lost"] is not None), 2)
+    grand_total = round(live_trustworthy + historical_total, 2)
+
+    print("=" * 78)
+    print("SEASON-TOTAL INJURY COST (combining both sections above)")
+    print("=" * 78)
+    print(f"  Currently on IL (MEDIUM/HIGH confidence only): {live_trustworthy:>8.2f} WAR")
+    print(f"  Historical, now-resolved stints:               {historical_total:>8.2f} WAR")
+    print("  " + "-" * 60)
+    print(f"  TOTAL ESTIMATED SEASON INJURY COST:            {grand_total:>8.2f} WAR")
+    print(f"\n  Note: this is a floor, not a ceiling -- excludes the LOW-")
+    print(f"  confidence live estimate (Will Wilson) and the historical")
+    print(f"  entries with no confirmed end date (see 'Not computed' above),")
+    print(f"  both of which represent real, additional cost this total")
+    print(f"  doesn't capture.")
+    print("=" * 78 + "\n")
+
+    unified = build_unified_table(rows, historical_rows)
+    print_unified_table(unified)

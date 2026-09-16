@@ -91,8 +91,50 @@ def _find_table(soup: BeautifulSoup, table_id: str):
     return None
 
 
+# ── flatten grouped/MultiIndex headers ────────────────────────────────────────
+def _flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    BUG FIX: the fielding table (players_standard_fielding) has a real,
+    GROUPED header on bbref's actual page -- columns are organized under
+    "Standard" / "Total Zone" / "DRS" / "Range Factor" / "Baserunners"
+    section labels (confirmed directly against the real page tonight).
+    pd.read_html() parses this into a genuine MultiIndex, which _clean()
+    below was never able to handle -- it looks for a plain "Player" or
+    "Name" column, silently finds neither (since the real column is a
+    tuple like ('Unnamed: 1_level_0', 'Player')), and returns the
+    table completely UNCLEANED: no Team Totals row removed, no numeric
+    conversion, nothing. This was traced end-to-end tonight -- every
+    downstream fix built into fielding_breakdown.py (filtering "Team
+    Totals"/shift rows, parsing stringified tuple columns from the
+    cache) was compensating for this table never being cleaned at the
+    source. Fixing it here means every consumer of get_seattle_stats()
+    gets a properly cleaned fielding table, not just one downstream
+    script.
+
+    Only the batting/pitching/value tables use plain single-level
+    headers on bbref's real page, so this only changes behavior for a
+    table that previously wasn't being flattened at all -- safe no-op
+    for every other table already working correctly.
+    """
+    if not isinstance(df.columns, pd.MultiIndex):
+        return df
+    new_cols = []
+    for top, bottom in df.columns:
+        top_str, bottom_str = str(top), str(bottom)
+        new_cols.append(bottom_str)  # bbref's real fielding stat names
+                                     # (Rtot, Rdrs, RF/9, etc.) are
+                                     # already unique on their own -- no
+                                     # group-prefix needed to
+                                     # disambiguate, unlike the ABS
+                                     # challenge tables earlier tonight
+    df = df.copy()
+    df.columns = new_cols
+    return df
+
+
 # ── clean dataframe ───────────────────────────────────────────────────────────
 def _clean(df: pd.DataFrame, name_col: str = None) -> pd.DataFrame:
+    df = _flatten_columns(df)
     # auto-detect name column — bbref uses Name or Name (link text)
     if name_col is None:
         for candidate in ["Name", "Player", "Pitcher", "Batter"]:
@@ -103,8 +145,17 @@ def _clean(df: pd.DataFrame, name_col: str = None) -> pd.DataFrame:
         return df
     # drop repeated header rows and totals
     df = df[df[name_col].notna()].copy()
+    # BUG FIX: the real fielding page has MORE non-player summary rows
+    # than this list covered -- "Infield Shifts", "Non-Shift Infield
+    # Positioning", "Outfield Positioning" (team-wide shift/positioning
+    # category rows), confirmed directly against the real page tonight.
+    # Without flattening, these were never even reachable by this
+    # filter in the first place; now that flattening lets this run,
+    # the filter itself needs to actually cover them.
     df = df[~df[name_col].isin([name_col, "Name", "Player", "Totals",
-                                 "Team Totals", "Tm"])]
+                                 "Team Totals", "Tm", "Infield Shifts",
+                                 "Non-Shift Infield Positioning",
+                                 "Outfield Positioning"])]
     # strip bbref asterisks / hashes from names
     df[name_col] = (df[name_col]
                     .str.replace(r"[*#]", "", regex=True)
