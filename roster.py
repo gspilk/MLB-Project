@@ -79,3 +79,36 @@ def is_on_roster(name_or_key: str, roster_last_names: set) -> bool:
     else:
         last = last_name_only(name_or_key)
     return last in roster_last_names
+
+def get_active_roster_keys(data: dict) -> set:
+    """
+    Real fix: get_roster_keys() answers "who is on the 40-man roster,"
+    which is a genuinely different question from "who is actually active
+    in the majors right now." Being optioned to AAA or placed on the IL
+    does NOT remove a player from the 40-man -- confirmed directly against
+    the real page (Patrick Wisdom, Ryan Bliss, Brennen Davis (60-day IL),
+    Colt Emerson (60-day IL), Brendan Donovan (7-day IL) are all real
+    40-man members with no active-roster mark).
+
+    The real page distinguishes this with a literal "*" in a column named
+    "OnActv" for active players. This only works once seattle_scraper.py's
+    _clean() stops numeric-coercing that column into NaN for every row --
+    add "OnActv" and "IL" to its skip set (skip = {"Name", "Pos", "Tm",
+    "Lg", "OnActv", "IL"}) so the real marker survives.
+
+    Returns an empty set (not an exception) if the roster table is
+    missing, failed to scrape, or OnActv isn't present yet (e.g. the
+    seattle_scraper.py fix above hasn't been applied) -- callers should
+    treat an empty set as "can't tell who's active" and fall back
+    gracefully, same convention as get_roster_last_names().
+    """
+    roster_df = data.get("seattle", {}).get("roster")
+    if roster_df is None or not isinstance(roster_df, pd.DataFrame) or roster_df.empty:
+        return set()
+    if "OnActv" not in roster_df.columns or "Name" not in roster_df.columns:
+        return set()
+
+    active = roster_df[
+        roster_df["OnActv"].notna() & (roster_df["OnActv"].astype(str).str.strip() != "")
+    ]
+    return {key_from_first_last(n) for n in active["Name"].dropna()}

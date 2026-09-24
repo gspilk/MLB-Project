@@ -26,6 +26,7 @@ Usage:
     last_name_only("Ferrer, Jose A.")           -> "ferrer"
 """
 
+import re
 import unicodedata
 
 
@@ -41,11 +42,27 @@ def normalize(s: str) -> str:
     return _strip_accents(str(s).lower().strip())
 
 
+# BUG FIX: bbref decorates minor-league (and some other) player names with
+# trailing markers -- "*" for bats-left, "#" for switch-hitter -- e.g.
+# "Lazaro Montes*", "Brock Rodden#". Real, confirmed bug: these survived
+# all the way into the built key ("montes*_lazaro" instead of
+# "montes_lazaro"), which meant a minor-league name with the marker never
+# matched the same real player's clean, marker-free roster-table name (the
+# roster table has these already stripped by mariners_stats.py's own
+# cleaning step, which is why "Michael Arroyo" with no marker matched fine
+# while "Lazaro Montes*" and "Brock Rodden#" silently didn't). Stripped
+# here, in the one shared place all three key functions route through, so
+# every caller gets this fix at once rather than needing its own cleanup.
+_TRAILING_MARKERS_RE = re.compile(r"[\*#†‡]+\s*$")
+
+
 def _clean_last(last: str) -> str:
     """
-    Strip roster-page annotations like '(60-day IL)' and trailing
-    whitespace/punctuation that show up in bbref roster/injury tables.
+    Strip roster-page annotations like '(60-day IL)', bbref's trailing
+    "*"/"#" batting-hand markers, and trailing whitespace/punctuation that
+    show up in bbref roster/injury/minor-league tables.
     """
+    last = _TRAILING_MARKERS_RE.sub("", str(last))
     return last.split("(")[0].strip().rstrip(",")
 
 
