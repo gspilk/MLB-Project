@@ -164,10 +164,21 @@ def _clean(df: pd.DataFrame, name_col: str = None) -> pd.DataFrame:
     if name_col != "Name":
         df = df.rename(columns={name_col: "Name"})
     # numeric conversion on everything except text cols
-    skip = {"Name", "Pos", "Tm", "Lg"}
+    # BUG FIX: "OnActv" and "IL" weren't in this skip set, so bbref's real
+    # "*" active-roster marker and "15-day"/"60-day" IL text both got
+    # force-converted to a number, failed, and became NaN for every row --
+    # the one real signal that distinguishes "on the 40-man" from
+    # "actually active right now" was being silently destroyed here.
+    skip = {"Name", "Pos", "Tm", "Lg", "OnActv", "IL"}
     for col in df.columns:
         if col not in skip:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # BUG FIX: this function fell off the end here with no return
+    # statement, so it always returned None for any table with a matched
+    # name column (every real table _parse() calls it on) -- _parse()'s
+    # own print/len(df) call is what actually surfaced this as a crash,
+    # but the bug lives here, not there.
     return df.reset_index(drop=True)
 
 

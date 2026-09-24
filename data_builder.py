@@ -111,6 +111,7 @@ def build_all(season=SEASON, force_refresh=False) -> dict:
     # back to their bundled list with a warning (see statcast_scraper.py).
     roster_keys = get_roster_keys(data)
     print(f"[build] live roster: {len(roster_keys)} players")
+    data["roster_keys"] = roster_keys          # <-- add this line
 
     data["statcast"] = build_statcast(roster_keys)
 
