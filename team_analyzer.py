@@ -620,8 +620,9 @@ def overall_grade(offense: dict, pitching: dict,
     # elite pitching + injuries = buy not sell
 
     # win projection -- blend current pace with last30 pace
-    record   = standings.get("record","0-0")
-    last30   = standings.get("last30","")
+    record          = standings.get("record","0-0")
+    last30          = standings.get("last30","")
+    games_remaining = None
     try:
         w, l = map(int, record.split("-"))
         games_played    = w + l
@@ -648,13 +649,55 @@ def overall_grade(offense: dict, pitching: dict,
     except Exception:
         projected_wins = 88
 
+    # BUG FIX 2026-09-26: grade/verdict above come purely from an average
+    # of component quality (offense/rotation/bullpen), with zero awareness
+    # of real standings -- a team that's 5 games back in the wild card with
+    # only 2 games left still came out of the block above as "B -- Wild
+    # card contender", because that block never looks at the standings at
+    # all. wc_games_back is the REAL games-back figure (as opposed to
+    # wc_gap, which is a win% differential, not games) and is already
+    # correctly computed by standings_scraper.py / analyze_standings() --
+    # it just wasn't being used here. Below, use it together with
+    # games_remaining (computed just above from the live record) to catch
+    # practical/mathematical elimination and override the quality-based
+    # verdict (and grade, when it's the elimination itself making the
+    # quality-based grade misleading) rather than leaving a playoff-contender
+    # label on a team that's already been shut out of the race.
+    wc_games_back = standings.get("wc_games_back")
+    div_rank      = standings.get("div_rank")
+    div_leader    = div_rank == 1
+    eliminated    = False
+
+    if (not div_leader and wc_games_back is not None
+            and games_remaining is not None):
+        if games_remaining <= 0 and wc_games_back > 0:
+            eliminated = True
+            grade   = "D" if total < 2.0 else "C-"
+            verdict = "Missed the playoffs"
+        elif wc_games_back > games_remaining:
+            # can't make up the gap even winning out while the leader
+            # loses none -- mathematically (or as good as) eliminated
+            eliminated = True
+            grade   = "D" if total < 2.0 else "C-"
+            verdict = "Eliminated from playoff contention"
+        elif wc_games_back > games_remaining * 0.6 and grade in ("B+", "B"):
+            # not eliminated yet, but the component-quality grade is
+            # painting a rosier playoff picture than the real hill left to
+            # climb -- keep the letter grade honest about roster quality,
+            # but don't call it a "contender" verdict
+            verdict = "Playoff long shot"
+
     # deadline logic:
     # elite rotation (rank <=6) = never sell, always at least minor buyer
     # injuries driving bad record = buy not sell
     era_rank = pitching.get("team_era_rank", 15)
     luck     = float(standings.get("luck", 0) or 0)
 
-    if era_rank and era_rank <= 6:
+    if eliminated:
+        # mathematically (or effectively) out of it -- nothing left to buy
+        # for, whatever the pitching quality or luck numbers say
+        deadline = "Seller"
+    elif era_rank and era_rank <= 6:
         deadline = "Minor buyer — elite pitching, add depth"
     elif era_rank and era_rank <= 10 and luck < -1.0:
         deadline = "Minor buyer — unlucky, improvement coming"

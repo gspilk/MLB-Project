@@ -1,18 +1,153 @@
 """
 statcast_scraper.py
-Reads Statcast CSV exports from Baseball Savant leaderboards.
+Two sources of Statcast data:
 
-Save CSVs as:
-  data/statcast_batters_2026.csv
-  data/statcast_pitchers_2026.csv
+  1. League-wide leaders (get_statcast) -- still a manual CSV export from
+     Baseball Savant's leaderboard, used only for league baselines and
+     MLB-wide rankings. Save CSVs as:
+       data/statcast_batters_2026.csv
+       data/statcast_pitchers_2026.csv
+
+  2. Mariners-direct (get_team_statcast) -- LIVE, no manual download.
+     BUG FIX 2026-09-27: for months, EVERY xwOBA-based grade/note in this
+     project (Miller "elite underneath", every luck callout, every
+     "ERA misleading" note) was silently computed off a one-time manual
+     CSV export from June 5 that nobody thought to refresh, because
+     get_statcast() only ever reads a static local file -- `--refresh`
+     never touched it. Root cause wasn't a code bug, it was a design gap:
+     there was no live-fetch path for Statcast at all.
+     get_team_statcast() closes that gap by hitting Baseball Savant's own
+     leaderboard endpoint filtered to one team (?team=136&csv=true), which
+     returns real, current, Mariners-only rows directly -- no manual
+     download, and no need for the roster-matching layer that's caused
+     most of this project's other real bugs (Brash/Gilbert/Davila WAR
+     collision, Montes/Rodden marker mismatch, etc.), since the data is
+     already scoped to one team server-side.
 """
 
 import os
+import io
+import time
 import pandas as pd
+import requests
 
 DATA_DIR     = os.path.join(os.path.dirname(__file__), "data")
 BATTER_FILE  = os.path.join(DATA_DIR, "statcast_batters_2026.csv")
 PITCHER_FILE = os.path.join(DATA_DIR, "statcast_pitchers_2026.csv")
+
+SEA_TEAM_ID  = 136
+CACHE_DIR    = os.path.join(DATA_DIR, "cache")
+CACHE_TTL_HOURS = 6   # matches the "seattle stats" TTL -- updates daily-ish
+
+STATCAST_LEADERBOARD_URL = "https://baseballsavant.mlb.com/leaderboard/expected_statistics"
+
+# Column names Savant's leaderboard actually returns when filtered by team
+# (confirmed 2026-09-27 against a real ?team=136&min=1&csv=true response --
+# this is a DIFFERENT schema than the plain league-wide export below, e.g.
+# "est_woba" here vs. "xwoba" there, and this one includes era/xera directly).
+TEAM_RENAME = {
+    "last_name, first_name": "Name",
+    "pa":                    "PA",
+    "bip":                   "BIP",
+    "ba":                    "BA",
+    "est_ba":                "xBA",
+    "slg":                   "SLG",
+    "est_slg":               "xSLG",
+    "woba":                  "wOBA",
+    "est_woba":              "xwOBA",
+    "era":                   "ERA",
+    "xera":                  "xERA",
+}
+
+
+def _team_cache_path(player_type: str, team: int, year: int) -> str:
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    return os.path.join(CACHE_DIR, f"statcast_team{team}_{player_type}_{year}.parquet")
+
+
+def _is_stale(path: str, ttl_hours: float = CACHE_TTL_HOURS) -> bool:
+    if not os.path.exists(path):
+        return True
+    age_hours = (time.time() - os.path.getmtime(path)) / 3600
+    return age_hours > ttl_hours
+
+
+def _fetch_team_leaderboard(player_type: str, team: int = SEA_TEAM_ID,
+                            year: int = 2026, timeout: int = 20) -> pd.DataFrame:
+    """
+    Live-fetches Baseball Savant's expected-statistics leaderboard filtered
+    to one team. player_type: "batter" or "pitcher".
+
+    min=1 is required -- BUG FIX 2026-09-27: without an explicit min,
+    Savant's leaderboard defaults to a "qualified" PA/BF threshold that
+    silently drops short-relief arms and September call-ups. A real test
+    against this exact URL with no min returned only 10 of Seattle's ~26
+    pitchers. min=1 is the most permissive value Savant accepts and is
+    the only way to get the FULL roster, not just the qualified players.
+    """
+    params = {
+        "type": player_type,
+        "year": year,
+        "team": team,
+        "min":  1,
+        "csv":  "true",
+    }
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                              "AppleWebKit/537.36 (KHTML, like Gecko) "
+                              "Chrome/124.0.0.0 Safari/537.36"}
+    resp = requests.get(STATCAST_LEADERBOARD_URL, params=params,
+                        headers=headers, timeout=timeout)
+    resp.raise_for_status()
+    df = pd.read_csv(io.StringIO(resp.text))
+    df = df.rename(columns=TEAM_RENAME)
+
+    if player_type == "pitcher":
+        df = df.rename(columns={"wOBA": "wOBA_against", "xwOBA": "xwOBA_against"})
+
+    skip = {"Name", "year", "player_id"}
+    for col in df.columns:
+        if col not in skip:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    return df.reset_index(drop=True)
+
+
+def get_team_statcast(team: int = SEA_TEAM_ID, year: int = 2026,
+                      force_refresh: bool = False):
+    """
+    Returns (batters_df, pitchers_df) for one team, live from Baseball
+    Savant, cached to parquet for CACHE_TTL_HOURS so a normal run doesn't
+    hit the network every time. Falls back to a stale cache (with a
+    warning) if the live fetch fails, rather than crashing the whole
+    pipeline over a network hiccup -- same philosophy as the roster-keys
+    fallback in roster.py.
+    """
+    results = {}
+    for player_type in ("batter", "pitcher"):
+        cache_path = _team_cache_path(player_type, team, year)
+        label = "sea_batters" if player_type == "batter" else "sea_pitchers"
+
+        if not force_refresh and not _is_stale(cache_path):
+            print(f"  [cache] loading team statcast {player_type}s from disk")
+            results[label] = pd.read_parquet(cache_path)
+            continue
+
+        try:
+            print(f"  [fetch] team statcast {player_type}s (team={team}) ...")
+            df = _fetch_team_leaderboard(player_type, team, year)
+            df.to_parquet(cache_path, index=False)
+            print(f"    [ok]  {len(df)} {player_type}s")
+            results[label] = df
+        except Exception as e:
+            print(f"    [warn] live fetch failed ({e})")
+            if os.path.exists(cache_path):
+                print(f"    [warn] using stale cache instead")
+                results[label] = pd.read_parquet(cache_path)
+            else:
+                print(f"    [warn] no cache available -- returning empty")
+                results[label] = pd.DataFrame()
+
+    return results["sea_batters"], results["sea_pitchers"]
 
 # exact CSV column names from savant
 RENAME = {
