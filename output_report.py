@@ -27,7 +27,8 @@ OUTPUT_DIR  = os.path.join(os.path.dirname(__file__), "output")
 OUTPUT_FILE = os.path.join(OUTPUT_DIR,
     f"mariners_report_{date.today().strftime('%Y%m%d')}.xlsx")
 
-HISTORY_PATH = os.path.join(os.path.dirname(__file__), "data", "history.parquet")
+HISTORY_PATH        = os.path.join(os.path.dirname(__file__), "data", "history.parquet")
+PLAYER_HISTORY_PATH = os.path.join(os.path.dirname(__file__), "data", "player_history.parquet")
 
 NAVY     = "1B2A4A"
 TEAL     = "005C5C"
@@ -719,7 +720,20 @@ def _sheet_simulation(wb, scenarios: dict, data: dict = None):
         r += 1
 
 
-def _append_history_row(d: dict, ou: dict) -> None:
+def _append_history_row(d: dict, ou: dict, scenarios: dict = None) -> None:
+    # BUG FIX 2026-09-27: this row used to be missing the two numbers
+    # that actually matter most for a "how close were we to the
+    # playoffs, day by day" Power BI chart -- wc_games_back (the REAL
+    # games-back figure) and wc_gap were both already computed live
+    # every run (see standings_scraper.py / analyze_standings()) but
+    # never made it into the one place meant for tracking trends over
+    # time. Also adds buyer_seller (so you can see exactly which day
+    # the stance flipped) and the real RS/G, RA/G run environment
+    # (pulled from the simulator's baseline scenario, since those are
+    # the actual inputs to the luck/pythag math, not just the derived
+    # win_pct) and a same-day IL count for correlating slumps with
+    # injury waves.
+    baseline = (scenarios or {}).get("baseline", {})
     row = {
         "date":               date.today().isoformat(),
         "record":             d.get("record"),
@@ -738,6 +752,12 @@ def _append_history_row(d: dict, ou: dict) -> None:
         "era_rank":           d.get("era_rank"),
         "div_rank":           d.get("div_rank"),
         "mlb_rank":           d.get("mlb_rank"),
+        "wc_games_back":      d.get("wc_games_back"),
+        "wc_gap":             d.get("wc_gap"),
+        "buyer_seller":       d.get("buyer_seller"),
+        "rs_g":               baseline.get("rs_g"),
+        "ra_g":               baseline.get("ra_g"),
+        "il_count":           len(d.get("on_il") or []),
         "most_likely_outlook": ou.get("most_likely"),
     }
 
@@ -759,6 +779,74 @@ def _append_history_row(d: dict, ou: dict) -> None:
     history = history.sort_values("date").reset_index(drop=True)
     history.to_parquet(HISTORY_PATH, index=False)
     print(f"[report] history updated: {HISTORY_PATH} ({len(history)} snapshots)")
+
+
+def _append_player_history_row(grades: dict) -> None:
+    """
+    NEW 2026-09-27: player_grades.py recomputes every player's grade/
+    WAR/xwOBA fresh on every run, but none of it was ever retained --
+    each run silently overwrote the last, so there was no way to chart
+    a player's arc over the season (e.g. Raleigh's or Miller's real
+    collapse-and-partial-recovery pattern), only see it after the fact
+    in a season recap. This snapshots one row per player per day into
+    a SEPARATE file from the team-level history.parquet (batters and
+    pitchers have genuinely different stat columns -- OPS/xwOBA vs.
+    ERA/xwOBA_against -- so this is intentionally a wide table with
+    real, expected nulls on whichever side doesn't apply, not the
+    kind of accidental cross-table schema pollution that caused real
+    bugs elsewhere in this project's caching).
+
+    Dedupes on (date, name, player_type) the same way _append_history_row
+    dedupes on date, so re-running --refresh twice in one day updates
+    that day's snapshot instead of duplicating it.
+    """
+    today = date.today().isoformat()
+    rows = []
+
+    for g in grades.get("batters", []):
+        rows.append({
+            "date": today, "player_type": "batter", "name": g.get("name"),
+            "grade": g.get("grade"), "role": g.get("role"), "action": g.get("action"),
+            "PA_or_IP": g.get("PA"), "rate_stat": g.get("OPS"),
+            "xwoba": g.get("xwOBA"), "WAR": g.get("WAR"), "luck": g.get("luck"),
+            "confidence": g.get("confidence"),
+        })
+
+    for g in grades.get("pitchers", []):
+        rows.append({
+            "date": today, "player_type": "pitcher", "name": g.get("name"),
+            "grade": g.get("grade"), "role": g.get("role"), "action": g.get("action"),
+            "PA_or_IP": g.get("IP"), "rate_stat": g.get("ERA"),
+            "xwoba": g.get("xwOBA_against"), "WAR": g.get("WAR"), "luck": g.get("luck"),
+            "confidence": g.get("confidence"),
+        })
+
+    if not rows:
+        return
+
+    os.makedirs(os.path.dirname(PLAYER_HISTORY_PATH), exist_ok=True)
+    new_rows = pd.DataFrame(rows)
+
+    if os.path.exists(PLAYER_HISTORY_PATH):
+        try:
+            history = pd.read_parquet(PLAYER_HISTORY_PATH)
+            # drop today's rows for any player being re-written this run
+            # (same-day re-refresh should update, not duplicate)
+            key = list(zip(new_rows["date"], new_rows["name"], new_rows["player_type"]))
+            existing_key = list(zip(history["date"], history["name"], history["player_type"]))
+            history = history[[k not in key for k in existing_key]]
+            history = pd.concat([history, new_rows], ignore_index=True)
+        except Exception as e:
+            print(f"  [warn] could not read existing player_history.parquet ({e}) "
+                  f"-- starting a fresh player history file")
+            history = new_rows
+    else:
+        history = new_rows
+
+    history = history.sort_values(["date", "player_type", "name"]).reset_index(drop=True)
+    history.to_parquet(PLAYER_HISTORY_PATH, index=False)
+    print(f"[report] player history updated: {PLAYER_HISTORY_PATH} "
+          f"({len(history)} player-snapshots)")
 
 
 def generate_report(data: dict, analysis: dict,
@@ -789,7 +877,8 @@ def generate_report(data: dict, analysis: dict,
     wb.save(path)
     print(f"[report] Saved: {path}")
 
-    _append_history_row(d, ou)
+    _append_history_row(d, ou, scenarios)
+    _append_player_history_row(grades)
 
     return path
 

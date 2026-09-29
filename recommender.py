@@ -170,6 +170,8 @@ def _team_diagnosis(analysis):
         "win_pct":        st.get("win_pct"),
         "div_rank":       st.get("div_rank"),
         "mlb_rank":       st.get("mlb_rank"),
+        "wc_games_back":  st.get("wc_games_back"),
+        "wc_gap":         st.get("wc_gap"),
         "luck":           st.get("luck"),
         "pythag":         st.get("pythag_wl"),
         "one_run":        st.get("one_run_wl"),
@@ -849,10 +851,11 @@ def _season_outlook(analysis, data):
     sc = analysis.get("schedule", {})
     pw = o.get("projected_wins", 88)
 
-    div_rank      = st.get("div_rank")
-    mlb_rank      = st.get("mlb_rank")
-    wc_games_back = st.get("wc_games_back")
-    wc_in_reach   = st.get("wc_in_reach")
+    div_rank        = st.get("div_rank")
+    mlb_rank        = st.get("mlb_rank")
+    wc_games_back   = st.get("wc_games_back")
+    wc_in_reach     = st.get("wc_in_reach")
+    games_remaining = sc.get("games_remaining")
 
     if div_rank is not None:
         division_text = f"{div_rank}{'st' if div_rank==1 else 'nd' if div_rank==2 else 'rd' if div_rank==3 else 'th'} place AL West"
@@ -861,9 +864,25 @@ def _season_outlook(analysis, data):
     else:
         division_text = "Division rank unavailable"
 
+    # BUG FIX 2026-09-27: wc_in_reach (from standings_scraper.py) is a pure
+    # win%-differential threshold (wc_gap > -0.060) with zero awareness of
+    # how many games are actually left -- the same blind spot just fixed in
+    # team_analyzer.py's overall_grade(), just living here too. Real case
+    # that caught it: 75-86, 5.0 games back, 1 game remaining still printed
+    # "Wild Card in reach" here even though overall_grade() correctly says
+    # "Eliminated from playoff contention" a few lines above it in the same
+    # report -- two sections of one report contradicting each other. Use
+    # games_remaining (already available via the schedule analysis, `sc`)
+    # to catch the case where the real games-back gap can't mathematically
+    # close anymore, same threshold as team_analyzer.py's elimination check.
     if wc_games_back is not None:
         if wc_games_back <= 0:
             playoff_path_text = "Currently holding a Wild Card spot"
+        elif (div_rank != 1 and games_remaining is not None
+                and wc_games_back > games_remaining):
+            playoff_path_text = (f"Eliminated from Wild Card contention "
+                                 f"— {wc_games_back:.1f} games back, "
+                                 f"{games_remaining} left")
         else:
             playoff_path_text = (f"Wild Card {'in reach' if wc_in_reach else 'a stretch'} "
                                  f"— {wc_games_back:.1f} games back")
