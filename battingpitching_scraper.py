@@ -1,22 +1,52 @@
 """
 batting_pitching_scraper.py
-Scrapes MLB batting and pitching leaders from baseball-reference.com
-for both AL and NL leagues.
+Scrapes MLB batting, pitching, AND fielding leaders from
+baseball-reference.com for both AL and NL leagues.
 
 Pages:
   https://www.baseball-reference.com/leagues/AL/2026-standard-batting.shtml
   https://www.baseball-reference.com/leagues/NL/2026-standard-batting.shtml
   https://www.baseball-reference.com/leagues/AL/2026-standard-pitching.shtml
   https://www.baseball-reference.com/leagues/NL/2026-standard-pitching.shtml
+  https://www.baseball-reference.com/leagues/AL/2026-standard-fielding.shtml
+  https://www.baseball-reference.com/leagues/NL/2026-standard-fielding.shtml
 
-Each page has two tables in live HTML:
-  teams_standard_batting    / teams_standard_pitching    ← team totals
-  players_standard_batting  / players_standard_pitching  ← individual stats
+Each page has two tables (batting/pitching in live HTML; fielding, per
+seattle_scraper.py's team-level equivalent, IN COMMENTS -- _find_table()
+below already checks both, so this works either way without needing to
+know in advance which one bbref uses for this specific page):
+  teams_standard_{stat}    ← team totals
+  players_standard_{stat}  ← individual stats
+
+FIELDING ADDED 2026-09-28: same URL/table-id pattern as batting/pitching
+(bbref uses one consistent "standard-{stat}" naming scheme across all
+three), added to close a real gap flagged in
+free_agent_recommendations.py -- external free agents had zero defensive
+data anywhere in this pipeline, only internal Mariners players did (via
+seattle_scraper.py's TEAM-level fielding table). This is the LEAGUE-wide
+version of that same table, matched into the free agent pool the same
+way batting/pitching stats already are.
+
+NEEDS A REAL TEST RUN: get_batting()/get_pitching() are both proven
+working in real runs. get_fielding() reuses the exact same
+_fetch_page/_parse_page/_clean plumbing, pointed at "fielding" as the
+stat_type -- the team-level fielding table (seattle_scraper.py) is
+confirmed to have Name/Pos/Inn/Rtot columns and to live in HTML
+comments, and this project's _find_table() already handles comment-
+wrapped tables automatically, so this SHOULD work the same way at league
+scale. But the league-wide version of this specific page has never
+actually been fetched by this project before, so the real column set
+(Rtot vs. Rdrs, whether "Pos" comes back as one combined multi-position
+string like "65/HD" the same way it does at team level, whether there's
+a "teams_standard_fielding" totals table at all) needs confirming
+against a real run, the same honest caveat every other new scraper in
+this project has carried before its first live test.
 
 Usage:
-    from batting_pitching_scraper import get_batting, get_pitching
+    from batting_pitching_scraper import get_batting, get_pitching, get_fielding
     bat = get_batting(2026)
     pit = get_pitching(2026)
+    fld = get_fielding(2026)
 """
 
 import os
@@ -92,8 +122,46 @@ def _find_table(soup: BeautifulSoup, table_id: str):
     return None
 
 
+# ── flatten grouped/MultiIndex headers ────────────────────────────────────────
+def _flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    BUG FIX 2026-09-28: the league-wide FIELDING page (unlike batting/
+    pitching, both flat single-level headers) has a real, GROUPED header
+    -- columns organized under "Standard" / "Total Zone" / "DRS" /
+    "Range Factor" / "Baserunners" section labels -- confirmed directly
+    via a live debug run (columns came back as literal tuples like
+    ('Total Zone', 'Rtot') instead of plain 'Rtot'). This is the exact
+    same real bug seattle_scraper.py already hit and fixed for the
+    TEAM-level fielding table -- ported here unchanged, since it's the
+    same underlying bbref page template at a different scope.
+
+    Without this, _clean() below can't find a "Player" column (it's
+    really a tuple like ('Unnamed: 1_level_0', 'Player')), silently
+    returns the dataframe completely untouched (no cleaning, no
+    numeric conversion, no league/stat_type tags), and Rtot/Rdrs never
+    become plain, matchable column names -- confirmed via a live run
+    where 0 of 279 free agents got a real fielding match even though
+    the page fetched and parsed "successfully" (887/883 rows).
+
+    Only affects fielding -- batting/pitching columns aren't a
+    MultiIndex, so this returns immediately for them, unchanged.
+    """
+    if not isinstance(df.columns, pd.MultiIndex):
+        return df
+    new_cols = []
+    for top, bottom in df.columns:
+        new_cols.append(str(bottom))  # bbref's real fielding stat names
+                                       # (Rtot, Player, PO, Fld%, etc.)
+                                       # are already unique on their own,
+                                       # no group-prefix needed
+    df = df.copy()
+    df.columns = new_cols
+    return df
+
+
 # ── clean dataframe ───────────────────────────────────────────────────────────
 def _clean(df: pd.DataFrame, league: str, stat_type: str) -> pd.DataFrame:
+    df = _flatten_columns(df)
     # auto detect name column
     name_col = next(
         (c for c in ["Name", "Player", "Pitcher", "Tm"]
@@ -127,8 +195,19 @@ def _clean(df: pd.DataFrame, league: str, stat_type: str) -> pd.DataFrame:
     df["league"]    = league
     df["stat_type"] = stat_type
 
-    # numeric conversion — skip text columns
-    skip = {"Name", "Tm", "Lg", "Pos", "league", "stat_type"}
+    # numeric conversion — skip text columns. "Pos"/"OnActv"/"IL" join the
+    # skip set for fielding the same reason seattle_scraper.py's _clean()
+    # needed them skipped at the team level: a combined position string
+    # ("65/HD") or an active-roster marker would otherwise get silently
+    # force-converted to NaN. "Team" (not "Tm") joins the set 2026-09-28:
+    # the league-wide fielding page's team column flattens (via
+    # _flatten_columns) to "Team", not "Tm" -- confirmed in a real debug
+    # run where the raw MultiIndex column was
+    # ('Unnamed: 3_level_0', 'Team'). Without this, bbref's team
+    # abbreviations there ("SEA", "TBR", ...) would get silently
+    # force-converted to NaN by pd.to_numeric below, same failure mode
+    # "Tm" was already guarded against.
+    skip = {"Name", "Tm", "Team", "Lg", "Pos", "league", "stat_type", "OnActv", "IL"}
     for col in df.columns:
         if col not in skip:
             df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -397,6 +476,64 @@ def get_pitching(season: int = 2026,
     return result
 
 
+def get_fielding(season: int = 2026,
+                 force_refresh: bool = False) -> dict:
+    """
+    Returns dict:
+        al_teams      AL team fielding totals (if bbref exposes this page
+                      -- may come back empty; not essential, the player-
+                      level table is what matters here)
+        al_players    AL individual fielding stats
+        nl_teams      NL team fielding totals
+        nl_players    NL individual fielding stats
+        all_players   AL + NL combined, sorted by Rtot (or Rdrs if that's
+                      what this particular season's page uses instead --
+                      bbref has used both naming conventions across
+                      different years) descending, best defenders first
+        all_teams     AL + NL combined
+
+    See this module's docstring for the "needs a real test run" caveat --
+    reuses the exact same, already-proven _fetch_page/_parse_page/_clean
+    plumbing as get_batting()/get_pitching(), just pointed at "fielding".
+    """
+    cache_keys  = ["al_teams", "al_players", "nl_teams",
+                   "nl_players", "all_players", "all_teams"]
+    cache_paths = {k: _cache_path(f"fielding_{k}_{season}") for k in cache_keys}
+
+    all_cached = all(os.path.exists(p) for p in cache_paths.values())
+    if not force_refresh and all_cached and not _is_stale(cache_paths["al_players"]):
+        print("[cache] loading fielding from disk")
+        return {k: pd.read_parquet(p) for k, p in cache_paths.items()}
+
+    print(f"[fetch] fielding leaders {season} ...")
+    al_teams, al_players = _parse_page("AL", "fielding", season)
+    time.sleep(2)
+    nl_teams, nl_players = _parse_page("NL", "fielding", season)
+
+    all_players = pd.concat([al_players, nl_players], ignore_index=True)
+    all_teams   = pd.concat([al_teams, nl_teams], ignore_index=True)
+
+    sort_col = "Rtot" if "Rtot" in all_players.columns else (
+               "Rdrs" if "Rdrs" in all_players.columns else None)
+    if sort_col:
+        all_players = all_players.sort_values(sort_col, ascending=False)
+
+    result = {
+        "al_teams":    al_teams,
+        "al_players":  al_players,
+        "nl_teams":    nl_teams,
+        "nl_players":  nl_players,
+        "all_players": all_players.reset_index(drop=True),
+        "all_teams":   all_teams.reset_index(drop=True),
+    }
+
+    for k, df in result.items():
+        if not df.empty:
+            df.to_parquet(cache_paths[k], index=False)
+
+    return result
+
+
 # ── test ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
 
@@ -452,4 +589,12 @@ if __name__ == "__main__":
 
     print("\n── AL saves leaders (top 10) ──")
     print(get_leaders(pit["al_players"], "SV", top=10, league="AL")
+          .to_string(index=False))
+
+    # ── fielding ─────────────────────────────────────────────────────────────
+    fld = get_fielding(2026, force_refresh=True)  # always fresh
+
+    print("\n── AL fielding leaders by Rtot (top 15) ──")
+    sort_col = "Rtot" if "Rtot" in fld["al_players"].columns else "Rdrs"
+    print(get_leaders(fld["al_players"], sort_col, top=15, league="AL", ascending=False)
           .to_string(index=False))
