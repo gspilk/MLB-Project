@@ -12,6 +12,19 @@ batting leaders or pitching leaders table (Catchers/First Basemen/.../
 Designated Hitters = batter; Starting Pitchers/Right-Handed Relievers/
 Left-Handed Relievers = pitcher).
 
+FIELDING ADDED 2026-09-28: every matched free agent (batter or pitcher)
+also gets a fielding lookup against data["fielding"]["all_players"] now
+-- this closes a real gap flagged in free_agent_recommendations.py,
+where external free agents had zero defensive data anywhere in this
+pipeline while internal Mariners players did. Attaches "Rtot" (or
+"Rdrs", normalized to the "Rtot" column name either way so downstream
+code -- get_fielding_bonus() -- doesn't need to know which one a given
+season's page actually used) when a match is found. Not every free
+agent will have a fielding match (part-time players, DH-only guys with
+minimal defensive innings, or a name-format mismatch) -- same honest
+"matched" flag pattern already used for the batting/pitching match,
+not silently treated as "average defense."
+
 Usage:
     python free_agent_stats_matcher.py
 """
@@ -50,6 +63,13 @@ def enrich_free_agents(fa_df: pd.DataFrame, data: dict) -> pd.DataFrame:
     # nl_players separately.
     bat_leaders = data.get("batting", {}).get("all_players", pd.DataFrame())
     pit_leaders = data.get("pitching", {}).get("all_players", pd.DataFrame())
+    # NEW: league-wide fielding leaders, same all_players shape. Matched
+    # for EVERY free agent regardless of batter/pitcher -- a pitcher's
+    # own fielding rarely matters, but there's no harm in having it, and
+    # it keeps this one match step simple rather than branching.
+    field_leaders = data.get("fielding", {}).get("all_players", pd.DataFrame())
+    field_stat_col = "Rtot" if "Rtot" in field_leaders.columns else (
+                     "Rdrs" if "Rdrs" in field_leaders.columns else None)
 
     rows = []
     for _, agent in fa_df.iterrows():
@@ -92,6 +112,21 @@ def enrich_free_agents(fa_df: pd.DataFrame, data: dict) -> pd.DataFrame:
             else:
                 for stat in ["PA", "OPS", "OBP", "SLG", "HR", "RBI", "BA", "WAR"]:
                     row[stat] = match.get(stat)
+
+        # NEW: fielding match, independent of whether the batting/
+        # pitching match above succeeded -- a free agent could plausibly
+        # match on defense even if their offensive line didn't match
+        # (or vice versa), since these are two separately-scraped
+        # sources going through the same name-matching logic.
+        row["field_matched"] = False
+        if field_stat_col is not None:
+            field_match = _match_name(agent["name"], field_leaders)
+            if not field_match.empty and pd.notna(field_match.get(field_stat_col)):
+                row["Rtot"] = field_match.get(field_stat_col)
+                row["field_matched"] = True
+                if "Pos" in field_match.index:
+                    row["field_Pos"] = field_match.get("Pos")
+
         rows.append(row)
 
     return pd.DataFrame(rows)
@@ -113,7 +148,7 @@ def print_matched(df: pd.DataFrame, min_pa_or_ip: float = None):
         print("\n-- BATTERS (sorted by OPS) --")
         bat_sorted = bat.copy()
         bat_sorted["OPS"] = pd.to_numeric(bat_sorted["OPS"], errors="coerce")
-        cols = ["name", "age_2027", "position_group", "Team", "PA", "OPS", "HR", "RBI", "BA"]
+        cols = ["name", "age_2027", "position_group", "Team", "PA", "OPS", "HR", "RBI", "BA", "Rtot"]
         cols = [c for c in cols if c in bat_sorted.columns]
         print(bat_sorted.sort_values("OPS", ascending=False)[cols].to_string(index=False))
 
@@ -125,10 +160,14 @@ def print_matched(df: pd.DataFrame, min_pa_or_ip: float = None):
         cols = [c for c in cols if c in pit_sorted.columns]
         print(pit_sorted.sort_values("ERA")[cols].to_string(index=False))
 
+    field_matched_count = int(df["field_matched"].sum()) if "field_matched" in df.columns else 0
     print(f"\n  {unmatched_count} free agents had no real current-season "
-          f"match found (likely injured all year, minor-league only, "
-          f"or a name-format mismatch between sources -- not "
-          f"necessarily unavailable, just unverified here)")
+          f"offensive/pitching match found (likely injured all year, "
+          f"minor-league only, or a name-format mismatch between "
+          f"sources -- not necessarily unavailable, just unverified here)")
+    print(f"  {field_matched_count} of {len(df)} free agents also had a "
+          f"real fielding (Rtot) match -- part-timers, DH-only players, "
+          f"and name mismatches won't have one, same honesty rule as above")
     print("=" * 100 + "\n")
 
 
