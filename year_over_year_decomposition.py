@@ -285,9 +285,19 @@ def decompose_sum_stat(df_a: pd.DataFrame, df_b: pd.DataFrame,
             "Contribution": round(delta, 3),
         })
 
-    players = (pd.DataFrame(rows)
-               .sort_values("Contribution")
-               .reset_index(drop=True))
+    # BUG FIX: if stat_col genuinely isn't present in either season's
+    # table (e.g. an HR-less batting export), _table() returns {} for
+    # both, so `rows` stays empty and pd.DataFrame(rows) has NO columns
+    # at all -- sort_values("Contribution") then raised a real KeyError
+    # instead of just reporting "no data" like every other empty-input
+    # path in this project already does.
+    if not rows:
+        players = pd.DataFrame(columns=["Name", "status", f"{label_a}_{stat_col}",
+                                        f"{label_b}_{stat_col}", "Contribution"])
+    else:
+        players = (pd.DataFrame(rows)
+                   .sort_values("Contribution")
+                   .reset_index(drop=True))
 
     return {
         "team_a": team_a,

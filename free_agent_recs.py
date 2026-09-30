@@ -38,6 +38,7 @@ from data_builder import build_all
 from free_agent import get_mlbtr_free_agents
 from free_agent_stats_matcher import enrich_free_agents
 from team_diagnosis import LEAGUE_AVG
+from free_agent_market import load_market_data, attach_market_data, print_position_conflicts
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "output", "free_agent_charts")
 NEEDS_CSV  = os.path.join(os.path.dirname(__file__), "data", "diagnosed_needs.csv")
@@ -590,33 +591,79 @@ def compute_recommendation_score(df: pd.DataFrame, incumbents: dict,
     return df
 
 
-def print_recommendations(df: pd.DataFrame, top_n: int = 15):
+def print_recommendations(df: pd.DataFrame, top_n: int = 15, by_value: bool = False):
+    """
+    by_value=False (default): ranked by recommendation_score, same as
+    before -- "who's the best baseball fit."
+    by_value=True: ranked by Value_Score (score per $M of Est_Cost_M) --
+    "who's the best fit for the money," a genuinely different question.
+    Requires attach_market_data() to have already been run on df;
+    degrades gracefully (falls back to score-only columns, no crash) if
+    it hasn't -- Est_Cost_M/Value_Score just won't be in df yet.
+    """
     scored = df[df["recommendation_score"].notna()].copy()
-    scored = scored.sort_values("recommendation_score", ascending=False)
+    has_cost = "Est_Cost_M" in scored.columns
 
-    print("\n" + "=" * 110)
-    print("GENUINE RECOMMENDATIONS -- scale-normalized, need-weighted (position + team diagnosis), "
+    sort_col = "Value_Score" if (by_value and has_cost) else "recommendation_score"
+    if by_value and has_cost:
+        scored = scored[scored["Value_Score"].notna()]
+    scored = scored.sort_values(sort_col, ascending=False)
+
+    title = ("GENUINE RECOMMENDATIONS -- ranked by VALUE (score per $M), "
+              if by_value and has_cost else
+              "GENUINE RECOMMENDATIONS -- ranked by fit score, ")
+    print("\n" + "=" * 130)
+    print(title + "scale-normalized, need-weighted (position + team diagnosis), "
           "fit-adjusted, reliability-discounted")
-    print("=" * 110)
-    print(f"  {'Name':<20} {'Source':<18} {'Position':<20} {'Raw upg':>8} "
-          f"{'Reliab':>7} {'NeedW':>6} {'Fit':>5} {'SCORE':>7}")
-    print("  " + "-" * 100)
-    for _, row in scored.head(top_n).iterrows():
-        print(f"  {row['name']:<20} {row.get('source','?'):<18} "
-              f"{row['position_group']:<20} "
-              f"{row['upgrade']:>8.2f} "
-              f"{row['reliability']:>7.2f} "
-              f"{row['need_weight']:>6.2f} "
-              f"{row['fit_bonus']:>5.2f} "
-              f"{row['recommendation_score']:>7.2f}")
-    print("=" * 110)
+    print("=" * 130)
+    if has_cost:
+        print(f"  {'Name':<20} {'Source':<18} {'Position':<20} {'Raw upg':>8} "
+              f"{'Reliab':>7} {'NeedW':>6} {'Fit':>5} {'SCORE':>7} {'Est $M':>8} {'Val/$M':>8}")
+        print("  " + "-" * 122)
+        for _, row in scored.head(top_n).iterrows():
+            cost = row.get("Est_Cost_M")
+            cost_str = f"{cost:>8.1f}" if pd.notna(cost) else "     n/a"
+            val = row.get("Value_Score")
+            val_str = f"{val:>8.2f}" if pd.notna(val) else "     n/a"
+            print(f"  {row['name']:<20} {row.get('source','?'):<18} "
+                  f"{row['position_group']:<20} "
+                  f"{row['upgrade']:>8.2f} "
+                  f"{row['reliability']:>7.2f} "
+                  f"{row['need_weight']:>6.2f} "
+                  f"{row['fit_bonus']:>5.2f} "
+                  f"{row['recommendation_score']:>7.2f} "
+                  f"{cost_str} {val_str}")
+    else:
+        print(f"  {'Name':<20} {'Source':<18} {'Position':<20} {'Raw upg':>8} "
+              f"{'Reliab':>7} {'NeedW':>6} {'Fit':>5} {'SCORE':>7}")
+        print("  " + "-" * 100)
+        for _, row in scored.head(top_n).iterrows():
+            print(f"  {row['name']:<20} {row.get('source','?'):<18} "
+                  f"{row['position_group']:<20} "
+                  f"{row['upgrade']:>8.2f} "
+                  f"{row['reliability']:>7.2f} "
+                  f"{row['need_weight']:>6.2f} "
+                  f"{row['fit_bonus']:>5.2f} "
+                  f"{row['recommendation_score']:>7.2f}")
+    print("=" * 130)
     print("  Score = (upgrade / real scale) * (sample / (sample + k)) * need_weight * fit_bonus")
     print("  need_weight = position-level need (1.0/1.5) * team diagnosis category multiplier")
     print("    (see team_diagnosis.py / data/diagnosed_needs.csv -- run that first for this to be live)")
     print("  fit_bonus = contact/power profile match (batters) * defense bonus (when a real Rtot match exists)")
     print("  Reliability approaches 1.0 with a real, substantial sample;")
     print("  stays low for tiny samples regardless of how good the raw rate looks.")
-    print("=" * 110 + "\n")
+    if has_cost:
+        print("  Est $M = real Spotrac Prev_AAV (last actual salary), used as an honest cost ANCHOR --")
+        print("    not a market-value projection Spotrac hadn't published yet for this class. Players who")
+        print("    opted out of a known option use that option's value instead (a real forgone-value floor).")
+        print("  Val/$M = SCORE / Est $M -- 'n/a' means no real Spotrac match was found for that name,")
+        print("    NOT that they're free -- never treat a missing cost as zero.")
+        unmatched = scored[scored["Est_Cost_M"].isna() & (scored.get("Market_Matched") != "internal")]
+        if not unmatched.empty:
+            print(f"  ({len(unmatched)} of {len(scored)} shown have no real cost match: "
+                  f"{', '.join(unmatched['name'].head(8).tolist())}"
+                  f"{'...' if len(unmatched) > 8 else ''})")
+    print("=" * 130 + "\n")
 
 
 def print_depth_chart(scored: pd.DataFrame, incumbents: dict, position_group: str):
@@ -888,7 +935,20 @@ if __name__ == "__main__":
     # contact/power fit bonus (see compute_recommendation_score's
     # docstring)
     scored = compute_recommendation_score(upgraded, incumbents, needs)
+
+    print("Loading real Spotrac free agent market data (cost/contract info)...")
+    market = load_market_data()
+    if not market.empty:
+        print(f"  [ok] {len(market)} real free agents loaded from Spotrac")
+        scored = attach_market_data(scored, market)
+        matched_cost = scored[(scored["Market_Matched"] == True)]
+        print(f"  {len(matched_cost)} of {len(scored[scored['recommendation_score'].notna()])} "
+              f"scored recommendations have a real cost match")
+
     print_recommendations(scored)
+    if "Est_Cost_M" in scored.columns:
+        print_recommendations(scored, by_value=True)
+        print_position_conflicts(scored)
 
     html_path = generate_comparison_html(scored, incumbents)
     print(f"\nReal comparison page saved: {html_path}")
