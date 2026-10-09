@@ -29,6 +29,7 @@ Usage:
     python offseason_report.py --from-season 2025 --to-season 2026
 """
 import argparse
+import os
 import pandas as pd
 
 from data_builder import build_all
@@ -39,7 +40,7 @@ from free_agent_market import (
 )
 from team_diagnosis import diagnose_team, get_war_distribution, _team_fielding
 from mariners_stats import get_seattle_stats
-from year_over_year_decomposition import print_all_decompositions
+from year_over_year_decomposition import compute_all_decompositions, _print_block
 from free_agent_recs import (
     load_diagnosed_needs, build_mariners_incumbents, build_internal_candidates,
     add_upgrade_deltas, compute_recommendation_score, print_recommendations,
@@ -51,11 +52,59 @@ from fielding_targets import (
     print_full_team_fielding_ledger, get_fielding_targets, print_fielding_report,
 )
 
+EXPORT_DIR = os.path.join(os.path.dirname(__file__), "data", "exports")
+
 
 def _section(title: str):
     print("\n\n" + "#" * 100)
     print(f"# {title}")
     print("#" * 100)
+
+
+def export_report_csvs(needs: pd.DataFrame, scored: pd.DataFrame,
+                       full_ledger: pd.DataFrame, weak_spots: pd.DataFrame,
+                       targets: dict, decompositions: dict) -> list:
+    """
+    Writes every table this report produces to flat CSVs under
+    data/exports/, so a tool downstream of this project (Power BI, Excel,
+    anything that isn't this terminal) has something real to point at --
+    no chart library commitment implied or required to get this far.
+    Returns the list of paths actually written (a table with nothing in
+    it is skipped rather than writing an empty, confusing file).
+    """
+    os.makedirs(EXPORT_DIR, exist_ok=True)
+    written = []
+
+    def _write(df: pd.DataFrame, filename: str):
+        if df is None or df.empty:
+            return
+        path = os.path.join(EXPORT_DIR, filename)
+        df.to_csv(path, index=False)
+        written.append(path)
+
+    _write(needs, "diagnosed_needs.csv")
+    _write(scored, "free_agent_scored.csv")
+    _write(full_ledger, "fielding_ledger.csv")
+    _write(weak_spots, "fielding_weak_spots.csv")
+
+    # fielding_targets.py's targets dict is {position_group: DataFrame} --
+    # each options frame already carries its own "position_group" column
+    # (inherited from the enriched free agent pool), so concatenating is
+    # safe and gives one real, Power-BI-friendly table instead of N tiny
+    # per-position files.
+    if targets:
+        _write(pd.concat(targets.values(), ignore_index=True), "fielding_targets.csv")
+
+    # year-over-year decompositions: each entry's "players" table gets
+    # its own file, named after the stat it decomposes (e.g.
+    # "year_over_year_Batting_BA.csv") -- real per-player rows, not the
+    # team-level summary numbers (those are just a handful of scalars,
+    # already visible in the terminal output and not worth a CSV).
+    for title, (res, _is_rate) in decompositions.items():
+        safe_name = title.replace(" ", "_").replace("(", "").replace(")", "")
+        _write(res.get("players"), f"year_over_year_{safe_name}.csv")
+
+    return written
 
 
 def run_report(from_season: int = 2025, to_season: int = 2026):
@@ -92,7 +141,9 @@ def run_report(from_season: int = 2025, to_season: int = 2026):
     # ────────────────────────────────────────────────────────────────────
     stats_a = get_seattle_stats(from_season)
     stats_b = get_seattle_stats(to_season)
-    print_all_decompositions(stats_a, stats_b, str(from_season), str(to_season))
+    decompositions = compute_all_decompositions(stats_a, stats_b, str(from_season), str(to_season))
+    for title, (res, is_rate) in decompositions.items():
+        _print_block(title, res, str(from_season), str(to_season), is_rate=is_rate)
 
     # ────────────────────────────────────────────────────────────────────
     _section("3. FREE AGENT RECOMMENDATIONS -- WHO fixes it (fit + real cost/value)")
@@ -160,12 +211,25 @@ def run_report(from_season: int = 2025, to_season: int = 2026):
     print_full_team_fielding_ledger(data, real_team_total=real_team_total)
 
     weak_spots = get_mariners_fielding_weak_spots(data)
+    full_ledger = get_full_team_fielding_ledger(data)
     targets = get_fielding_targets(enriched_all, weak_spots, market, current_roster)
     print_fielding_report(weak_spots, targets, needs)
+
+    # ────────────────────────────────────────────────────────────────────
+    _section("5. CSV EXPORTS -- for Power BI, Excel, or anything else downstream")
+    # ────────────────────────────────────────────────────────────────────
+    written = export_report_csvs(needs, scored, full_ledger, weak_spots, targets, decompositions)
+    if written:
+        print(f"  Wrote {len(written)} CSV file(s) to {EXPORT_DIR}:")
+        for path in written:
+            print(f"    {os.path.basename(path)}")
+    else:
+        print("  No non-empty tables to export.")
 
     _section("END OF REPORT")
     print(f"  Diagnosis saved to data/diagnosed_needs.csv")
     print(f"  Free agent comparison page saved to {html_path}")
+    print(f"  CSV exports saved to {EXPORT_DIR}")
     print()
 
 

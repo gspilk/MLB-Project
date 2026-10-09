@@ -339,30 +339,47 @@ def _print_block(title: str, result: dict, label_a: str, label_b: str,
           f"(of {len(df)} total names touching this stat)")
 
 
-def print_all_decompositions(stats_a: dict, stats_b: dict,
-                             label_a: str, label_b: str):
-    # ── batting rate stats ──
+def compute_all_decompositions(stats_a: dict, stats_b: dict,
+                               label_a: str, label_b: str) -> dict:
+    """
+    Every decomposition this module knows how to run, computed ONCE and
+    returned as {label: (result_dict, is_rate)} -- the real shared step
+    between print_all_decompositions() (which just formats these for the
+    terminal) and anything that wants the raw per-player "players"
+    DataFrames instead (e.g. offseason_report.py's CSV export, so a
+    Power BI/Excel pass downstream doesn't need to re-derive this math
+    itself from scratch).
+    """
+    results = {}
+
     for stat in ["BA", "OBP", "SLG", "OPS"]:
         res = decompose_rate_stat(stats_a.get("batting"), stats_b.get("batting"),
                                   "PA", stat, label_a, label_b)
-        _print_block(f"Batting {stat}", res, label_a, label_b)
+        results[f"Batting {stat}"] = (res, True)
 
-    # ── batting counting stat ──
     res = decompose_sum_stat(stats_a.get("batting"), stats_b.get("batting"),
                              "HR", label_a, label_b)
-    _print_block("Batting HR (team total)", res, label_a, label_b, is_rate=False)
+    results["Batting HR (team total)"] = (res, False)
 
-    # ── pitching rate stats ──
     for stat in ["ERA", "WHIP"]:
         res = decompose_rate_stat(stats_a.get("pitching"), stats_b.get("pitching"),
                                   "IP", stat, label_a, label_b)
-        _print_block(f"Pitching {stat}", res, label_a, label_b)
+        results[f"Pitching {stat}"] = (res, True)
 
-    # ── fielding (additive, not weighted -- same convention as team_diagnosis.py) ──
+    # fielding (additive, not weighted -- same convention as team_diagnosis.py)
     fld_a, fld_b = stats_a.get("fielding"), stats_b.get("fielding")
     stat_col = "Rtot" if (fld_b is not None and "Rtot" in getattr(fld_b, "columns", [])) else "Rdrs"
     res = decompose_sum_stat(fld_a, fld_b, stat_col, label_a, label_b)
-    _print_block(f"Fielding {stat_col} (team total)", res, label_a, label_b, is_rate=False)
+    results[f"Fielding {stat_col} (team total)"] = (res, False)
+
+    return results
+
+
+def print_all_decompositions(stats_a: dict, stats_b: dict,
+                             label_a: str, label_b: str):
+    results = compute_all_decompositions(stats_a, stats_b, label_a, label_b)
+    for title, (res, is_rate) in results.items():
+        _print_block(title, res, label_a, label_b, is_rate=is_rate)
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
