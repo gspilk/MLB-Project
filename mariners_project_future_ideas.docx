@@ -1,0 +1,30 @@
+2027 Signing Projection Ideas
+Oct 4, 2026 · @Geoffel Spilker
+Ideas for turning the 2026 free agent rankings into a 2027 signing plan, grouped by what each one fixes. Start with the Statcast luck check.
+Make the scores more trustworthy
+Every score today comes from one season of stats, so these ideas test how much of it is real.
+• Statcast luck check: compare actual results to expected results (xwOBA, barrel rate, hard-hit rate) to flag likely regression and buy-low candidates. The data is already in data/.
+• 2027 player projections: blend the last 3 seasons, weight recent ones more, regress small samples toward average and apply an age adjustment. Needs the 2024 and 2025 league leaderboards.
+• Park adjustment: correct for home parks, since T-Mobile Park plays tough on hitters.
+• Durability: discount players who produce but miss a lot of games; injury_cost_track.py may be reusable.
+Price signings properly
+Cost is currently last year's salary, which leaves out several real costs.
+• Dollars per WAR: WAR is already in the free agent data but unused in scoring. This shows whether a price is fair against typical market rates.
+• Qualifying offer and pick cost: the "QOI" tag in the Spotrac data may mean signing the player costs a draft pick. Needs confirming.
+• Contract length and aging: price each deal over its whole length, not just year one.
+Turn it into decisions
+These turn the ranked lists into a single plan.
+• Budget slate picker: give it a payroll number and it picks the best combination, one player per position, handling overlaps like Suzuki at RF or DH.
+• 2027 season projection: simulate Seattle's 2027 with and without the signings, using montecarlo.py and the 2027 schedule, to get projected wins and division and playoff odds. Needs a strength estimate for all 30 teams.
+• Prospects on the ranked list: add near-ready AA and AAA players, with minor league stats converted to a rough MLB equivalent and adjusted for level and park, so "sign someone or play the kid" is one comparison.
+• Prospect-block check: flag signings that would sit in front of a ready prospect like Montes or Emerson.
+• Lineup balance by handedness: score how each signing changes the lineup against lefties and righties. Needs bats-handed data added.
+• Who else is bidding: run the diagnosis for all 30 teams to see who competes for each target.
+Suggested build order
+The first three make the scores more reliable; the last two turn them into a decision.
+1. Statcast luck check (small, data already in hand)
+2. 2027 player projections
+3. Dollars per WAR
+4. Budget slate picker
+5. 2027 season simulation with and without the signings
+Everything else can be added whenever it matters.
