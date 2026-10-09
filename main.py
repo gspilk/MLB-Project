@@ -24,6 +24,16 @@ def parse_args():
     return p.parse_args()
 
 
+def _season_is_over(analysis) -> bool:
+    """True once the real record shows all 162 games played."""
+    record = (analysis.get("standings", {}) or {}).get("record")
+    try:
+        w, l = map(int, str(record).split("-"))
+    except (ValueError, AttributeError):
+        return False
+    return w + l >= 162
+
+
 def main():
     args  = parse_args()
     start = time.time()
@@ -55,9 +65,19 @@ def main():
     from recommender import generate_recommendations, print_recommendations
     recs = generate_recommendations(data, analysis, grades)
 
+    # the deadline simulation and Excel report only make sense while games
+    # are still left to play -- once all 162 are in, the simulator divides
+    # by zero games remaining. Detect that from the real record and skip
+    # steps 5-6 cleanly instead of crashing after the data is already built.
+    season_over = _season_is_over(analysis)
+
     # step 5 -- simulation
-    print("\nSTEP 5/6 -- Running deadline simulation...")
-    from simulator import run_simulation, print_simulation, compute_rival_projections
+    if season_over:
+        print("\nSTEP 5/6 -- Season is over (162 games played) -- skipping deadline simulation")
+        scenarios = None
+    else:
+        print("\nSTEP 5/6 -- Running deadline simulation...")
+        from simulator import run_simulation, print_simulation, compute_rival_projections
 
     # simulator.py now pulls its own live state (record, RS/G, RA/G,
     # luck, ERA rank, real remaining schedule) internally when given
@@ -66,10 +86,13 @@ def main():
     # to cause real bugs this session when simulator.py and main.py
     # drifted out of sync with each other; this removes the possibility
     # entirely by making simulator.py responsible for its own state.
-    scenarios = run_simulation(data=data, analysis=analysis)
+        scenarios = run_simulation(data=data, analysis=analysis)
 
     # step 6 -- generate report
-    if not args.no_report and not args.print_only:
+    if season_over:
+        print("\nSTEP 6/6 -- Season is over -- skipping Excel report")
+        path = None
+    elif not args.no_report and not args.print_only:
         print("\nSTEP 6/6 -- Generating Excel report...")
         from output_report import generate_report
         path = generate_report(data, analysis, grades, recs, scenarios)
@@ -81,8 +104,9 @@ def main():
     print_analysis(analysis)
     print_grades(grades)
     print_recommendations(recs)
-    rival_projections = compute_rival_projections(data)
-    print_simulation(scenarios, rival_projections)
+    if not season_over:
+        rival_projections = compute_rival_projections(data)
+        print_simulation(scenarios, rival_projections)
 
     # summary
     elapsed = round(time.time() - start, 1)

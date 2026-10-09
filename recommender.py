@@ -921,6 +921,16 @@ def generate_recommendations(data, analysis, grades):
 
 
 # ── print ─────────────────────────────────────────────────────────────────────
+def _record_is_final(record) -> bool:
+    """True once the record shows all 162 games played -- used to hide
+    midseason-only output (deadline stance, games remaining, playoff path)."""
+    try:
+        w, l = map(int, str(record).split("-"))
+    except (ValueError, AttributeError):
+        return False
+    return w + l >= 162
+
+
 def print_recommendations(recs):
     d  = recs["diagnosis"]
     si = recs["stats_to_improve"]
@@ -935,6 +945,8 @@ def print_recommendations(recs):
     print(f"Generated: {recs['generated']}")
     print(f"{'='*65}")
 
+    final = _record_is_final(d.get("record"))
+
     print(f"\n── TEAM DIAGNOSIS ──")
     print(f"  Grade:          {d['grade']} — {d['verdict']}")
     print(f"  Record:         {d['record']}  div {d['div_rank']}/5  MLB {d['mlb_rank']}/30")
@@ -945,8 +957,9 @@ def print_recommendations(recs):
     print(f"  1-run / vLHP:   {d['one_run']} / {d['vlhp']}")
     print(f"  Last 10/30:     {d['last10']} / {d['last30']}")
     print(f"  Proj wins:      {d['projected_wins']}  ({d['floor']}—{d['ceiling']})")
-    print(f"  Deadline:       {d['buyer_seller']}")
-    print(f"  Games left:     {d['games_remaining']}  easy {d['easy_games']}  hard {d['hard_games']}")
+    if not final:
+        print(f"  Deadline:       {d['buyer_seller']}")
+        print(f"  Games left:     {d['games_remaining']}  easy {d['easy_games']}  hard {d['hard_games']}")
 
     print(f"\n── STATS TO IMPROVE ──")
     high = [s for s in si if s["priority"] == "HIGH"]
@@ -1027,7 +1040,8 @@ def print_recommendations(recs):
     print(f"  Record now:   {ou['current_record']}")
     print(f"  Most likely:  {ou['most_likely']}")
     print(f"  Floor/Ceiling:{ou['floor']}—{ou['ceiling']} wins")
-    print(f"  Playoff path: {ou['playoff_path']}")
+    if not final:
+        print(f"  Playoff path: {ou['playoff_path']}")
     print(f"\n{'='*65}\n")
 
 

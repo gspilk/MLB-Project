@@ -756,6 +756,16 @@ def analyze_team(data: dict) -> dict:
 
 
 # ── pretty print ──────────────────────────────────────────────────────────────
+def _record_is_final(record) -> bool:
+    """True once the record shows all 162 games played -- used to hide
+    midseason-only output (deadline stance, games remaining, playoff path)."""
+    try:
+        w, l = map(int, str(record).split("-"))
+    except (ValueError, AttributeError):
+        return False
+    return w + l >= 162
+
+
 def print_analysis(analysis: dict):
     """Pretty prints the full team analysis."""
     o  = analysis["overall"]
@@ -765,8 +775,10 @@ def print_analysis(analysis: dict):
     sc = analysis["schedule"]
     h  = analysis["health"]
 
+    final = _record_is_final(st.get("record"))
+
     print(f"\n{'='*60}")
-    print(f"SEATTLE MARINERS — MIDSEASON ANALYSIS")
+    print(f"SEATTLE MARINERS — {'FINAL SEASON ANALYSIS' if final else 'MIDSEASON ANALYSIS'}")
     print(f"Generated: {analysis['generated']}")
     print(f"{'='*60}")
 
@@ -777,7 +789,8 @@ def print_analysis(analysis: dict):
     print(f"  Bullpen:        {o['bullpen_grade']}")
     print(f"  Projected wins: {o['projected_wins']}")
     print(f"  Range:          {o['floor']}—{o['ceiling']} wins")
-    print(f"  Deadline:       {o['buyer_seller']}")
+    if not final:
+        print(f"  Deadline:       {o['buyer_seller']}")
 
     print(f"\n── STANDINGS ──")
     print(f"  Record:         {st.get('record')}")
@@ -822,14 +835,15 @@ def print_analysis(analysis: dict):
         for f in pi["flags"]:
             print(f"  → {f}")
 
-    print(f"\n── SCHEDULE ──")
-    print(f"  Games remaining: {sc.get('games_remaining')}")
-    print(f"  Easy games:      {sc.get('easy_games')}")
-    print(f"  Hard games:      {sc.get('hard_games')}")
-    print(f"\n  Next 7 games:")
-    for g in sc.get("next7", []):
-        status = "☑" if g["checked"] else "☐"
-        print(f"    {status} {g['date']}  {g['home_away']:4}  {g['opp']}")
+    if not final:
+        print(f"\n── SCHEDULE ──")
+        print(f"  Games remaining: {sc.get('games_remaining')}")
+        print(f"  Easy games:      {sc.get('easy_games')}")
+        print(f"  Hard games:      {sc.get('hard_games')}")
+        print(f"\n  Next 7 games:")
+        for g in sc.get("next7", []):
+            status = "☑" if g["checked"] else "☐"
+            print(f"    {status} {g['date']}  {g['home_away']:4}  {g['opp']}")
 
     print(f"\n── ROSTER HEALTH ──")
     if h.get("on_il"):
