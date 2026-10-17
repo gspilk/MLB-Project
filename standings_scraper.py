@@ -12,8 +12,9 @@ and both tables are calculated from those results:
 Same functions, column names, and return values as the old
 the old source version, so nothing else in the project has to change.
 
-Not available from game results alone (always None now):
-    vRHP / vLHP  (record vs right/left-handed starters)
+vRHP / vLHP (record vs right/left-handed starters) are not in game results,
+so they come from the Stats API's official standings split records
+(type "right" / "left"). If that call fails they stay None.
 
 Usage:
     from standings_scraper import get_standings
@@ -69,6 +70,36 @@ def _fetch_teams(season: int, force_refresh: bool = False) -> dict:
     return out
 
 
+def _fetch_hand_splits(season: int, force_refresh: bool = False) -> dict:
+    """
+    team id -> {"left": "W-L", "right": "W-L"} (record vs LHP / RHP starters)
+    from the Stats API standings endpoint. Returns {} if anything goes wrong,
+    so the rest of the standings still build.
+    """
+    try:
+        data = mlb_api.api_get(
+            "standings",
+            {"leagueId": "103,104", "season": season,
+             "standingsTypes": "regularSeason", "hydrate": "team"},
+            force_refresh=force_refresh)
+        out = {}
+        for rec in data.get("records", []):
+            for tr in rec.get("teamRecords", []):
+                tid = tr.get("team", {}).get("id")
+                splits = (tr.get("records") or {}).get("splitRecords") or []
+                by_type = {s.get("type"): f"{int(s['wins'])}-{int(s['losses'])}"
+                           for s in splits if "wins" in s and "losses" in s}
+                if tid is not None and ("left" in by_type or "right" in by_type):
+                    out[int(tid)] = {"left": by_type.get("left"),
+                                     "right": by_type.get("right")}
+        if not out:
+            print("  [warn] no vs-LHP/RHP split records in the standings feed -- leaving them blank")
+        return out
+    except Exception as e:
+        print(f"  [warn] vs-LHP/RHP split records unavailable ({e}) -- leaving them blank")
+        return {}
+
+
 def _fetch_games(season: int, force_refresh: bool = False) -> pd.DataFrame:
     """One row per completed regular-season game."""
     print(f"  [GET] MLB Stats API schedule {season}")
@@ -113,7 +144,8 @@ def _srs(logs: dict, iterations: int = 100):
     return srs, sos
 
 
-def _build_expanded(teams: dict, games: pd.DataFrame) -> pd.DataFrame:
+def _build_expanded(teams: dict, games: pd.DataFrame, hand_splits: dict = None) -> pd.DataFrame:
+    hand_splits = hand_splits or {}
     logs = _team_logs(games)
     srs, sos = _srs(logs)
 
@@ -169,8 +201,8 @@ def _build_expanded(teams: dict, games: pd.DataFrame) -> pd.DataFrame:
         row["Road"] = rec(lambda g: not g["home"])
         row["ExInn"] = rec(lambda g: g["innings"] > 9)
         row["1Run"] = rec(lambda g: abs(g["rs"] - g["ra"]) == 1)
-        row["vRHP"] = None
-        row["vLHP"] = None
+        row["vRHP"] = hand_splits.get(tid, {}).get("right")
+        row["vLHP"] = hand_splits.get(tid, {}).get("left")
         row["≥.500"] = rec(lambda g: season_pct.get(g["opp"], 0) >= 0.5)
         row["<.500"] = rec(lambda g: season_pct.get(g["opp"], 0) < 0.5)
         row["last10"] = last(10)
@@ -379,7 +411,8 @@ def get_standings(season: int = 2026, force_refresh: bool = False):
     print(f"[fetch] standings {season} (MLB Stats API) ...")
     teams = _fetch_teams(season, force_refresh)
     games = _fetch_games(season, force_refresh)
-    expanded_df = _build_expanded(teams, games)
+    hand_splits = _fetch_hand_splits(season, force_refresh)
+    expanded_df = _build_expanded(teams, games, hand_splits)
     division_tables = _build_division_tables(teams, expanded_df)
 
     pd.concat(division_tables.values(), ignore_index=True).to_parquet(division_cache, index=False)

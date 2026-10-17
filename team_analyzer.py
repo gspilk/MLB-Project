@@ -261,6 +261,13 @@ def analyze_pitching(data: dict) -> dict:
                     )
                 elif avg_bp_xwoba <= XWOBA_P_ABOVE:
                     result["bullpen_grade"] = "Above Average"
+                elif avg_bp_xwoba <= XWOBA_P_AVERAGE:
+                    result["bullpen_grade"] = "Average"
+                else:
+                    result["bullpen_grade"] = "Below Average"
+                    result["weaknesses"].append(
+                        f"Bullpen xwOBA {avg_bp_xwoba:.3f} -- below average"
+                    )
 
     # pitcher luck
     pit_luck = _safe_get(data, "statcast", "pit_luck")

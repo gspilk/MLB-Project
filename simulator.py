@@ -298,6 +298,17 @@ def compute_schedule_difficulty(data: dict) -> dict:
 
     all_teams = data.get("standings", {}).get("all_teams")
 
+    # Season complete: the schedule loaded fine and simply has no games left.
+    # That is not a missing-data problem, so do not fall back to the stale dict.
+    if (remaining_only is not None and len(remaining_only) == 0
+            and (next7 is None or next7.empty)
+            and all_teams is not None and not all_teams.empty):
+        print("  [schedule] 0 games remaining (season complete)")
+        return {
+            "easy_games": 0, "hard_games": 0, "neutral_games": 0,
+            "easy_winpct": 0.600, "hard_winpct": 0.400, "neutral_winpct": 0.515,
+        }
+
     if remaining is None or remaining.empty or all_teams is None or all_teams.empty:
         print("  [warn] no live schedule/standings -- falling back to "
               "stale hardcoded SCHEDULE, results may not be trustworthy")
