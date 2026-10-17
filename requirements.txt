@@ -1,0 +1,9 @@
+pandas
+numpy
+requests
+openpyxl
+pyarrow
+MLB-StatsAPI
+matplotlib
+# only needed for team_half_splits.py (pitch-level Statcast pulls)
+pybaseball

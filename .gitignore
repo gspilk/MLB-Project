@@ -1,0 +1,19 @@
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Old scripts I moved out of the way
+_old/
+
+# Downloaded data and caches (rebuilt by the scripts)
+data/*
+cache/
+output/
+
+# Generated reports and exports
+output/*.xlsx
+*.xlsx
+*.pbix
+*.csv
+*.parquet
+

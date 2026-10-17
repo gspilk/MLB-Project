@@ -1,0 +1,177 @@
+# Seattle Mariners Stretch-Run Analyzer
+
+A Python pipeline that pulls live 2026 MLB data — batting, pitching, standings, Statcast, and minor-league affiliate stats — from MLB's official sources and turns it into player grades, roster decisions, rest-of-season projections, and free-agent/prospect recommendations, all validated against real professional benchmarks.
+
+## Project description
+
+**Data**: 2026 season — standings, schedules, rosters, batting, pitching, fielding and minor-league stats from the official MLB Stats API, plus Statcast from Baseball Savant. Payroll, free-agent market prices and prospect rankings come from small CSV files you maintain, and ABS challenge data from Baseball Savant leaderboard downloads (see [Data sources](#data-sources)). WAR is the project's own calculation (see `mlb_api.py`).
+
+**Core pipeline** (`python main.py`):
+- Gets live standings across all 30 MLB teams
+- Gets the Mariners' full season schedule (completed games + upcoming)
+- Gets batting stats and advanced Statcast metrics, league-wide
+- Gets pitching stats and advanced Statcast metrics, league-wide
+- Gets the Mariners' own batting, pitching, fielding, and Statcast data specifically
+- Grades every Mariners player and drives roster decisions — keep, DFA, option to AAA, monitor — based on real performance, not gut feel
+- Grades batters on OPS, xwOBA, and luck (xwOBA vs. actual production gap); grades pitchers on ERA, WHIP, K/9, xwOBA against, and luck
+- Runs a rest-of-season simulation (live record, run differential, luck correction, real schedule difficulty, IL-return timelines) to project the final record and playoff odds
+- Runs a standalone Monte Carlo simulation (thousands of simulated seasons + postseason brackets) for a higher-resolution playoff-odds estimate
+
+**Additional tools** (run separately from the core pipeline):
+- **Offseason report and weakness targets** (`offseason_report.py`, `weakness_targets.py`, `story_app.py`) — ranks the team's weakest positions and stats against the league, scores candidates by fit (position, handedness, need), and presents it as a Streamlit app
+- **Free-agent recommendations** (`free_agent.py`, `free_agent_stats_matcher.py`, `free_agent_recs.py`, `mlb_free_agents.py`) — loads the free-agent class (your list, or MLB's own free-agent list), matches players to league-wide stats, and scores every free agent *and* internal roster candidate against the Mariners' actual incumbent at each position, weighted by need and reliability (sample-size shrinkage)
+- **Minor-league prospect tracking** (`minor_league_stats.py`, `minor_league_shortlist.py`) — pulls the full organizational batting/pitching stats (MLB Stats API) and your top-prospect rankings CSV, filtered down to real, near-MLB-ready talent (AA/AAA, meaningful sample size, excluding anyone already on the active roster)
+- **Injury cost tracking** (`injury_cost_track.py`) — role-aware estimate of real wins lost to injury, weighted by leverage for relievers and games-missed for everyday players
+- **Payroll tracking** (`payroll.py`) — team and league-wide payroll comparisons from your payroll CSVs
+- **Platoon lineup optimizer** (`platoon_lineup_optimizer.py`) — vs-LHP/vs-RHP lineup construction from real split data
+- **Starting-pitcher and ABS studies** — pitch counts, velocity, pitch mix, whiffs, release point and ABS challenges; see [Starting-pitcher studies](#starting-pitcher-studies-2025-vs-2026-and-abs)
+
+## What makes it different
+
+- **Built on official, permitted sources.** The MLB Stats API for traditional stats, standings, rosters and minor leagues; Baseball Savant for Statcast (xwOBA, Barrel%, Whiff%, Outs Above Average). One shared module (`mlb_api.py`) handles every API call, caching, and the project's own WAR, so every table uses the same player IDs and league context.
+- **Recommendations come from real statistical need, not a fixed wishlist.** Both the free-agent tool and the (now-dated, see note below) in-season trade-target logic identify the team's actual weak spots by position and stat, league-wide, rather than starting from a hand-picked list.
+- **Validated against real, independent models, not just self-consistent.** Simulator output was sanity-checked against publicly published playoff-odds projections. That process surfaced and fixed a real bug that had been silently excluding a chunk of the remaining schedule from every projection — the tool catching its own mistakes rather than just producing a number and trusting it. The same discipline (a small debug script to confirm the real data structure before trusting a source) has been used to catch and fix real bugs throughout this project.
+
+> **Note on trade targets:** `recommender.py`'s seller-based trade-target logic and the simulator's "deadline simulation" step were built for the in-season trade deadline. That's now passed for 2026 — the code still runs, but the free-agent/internal-candidate pipeline is the more current answer to "how does this team improve." Worth deciding whether to keep, retire, or repurpose the deadline-era code for next year's stretch run.
+
+## Steps (core pipeline)
+
+```
+STEP 1/6 -- Building data...
+STEP 2/6 -- Analyzing team...
+STEP 3/6 -- Grading players...
+STEP 4/6 -- Generating recommendations...
+
+[recommend] Generating recommendations...
+  [targets] filtering batters to positions the team actually needs: [...]
+  [targets] N teams flagged as likely sellers based on live standings
+  [targets] N batter targets found
+  [targets] N pitcher targets found
+[recommend] Done.
+
+STEP 5/6 -- Running rest-of-season simulation...
+STEP 6/6 -- Generating Excel report...
+```
+
+Run it with:
+```
+python main.py --refresh
+```
+
+Output is a formatted Excel report (Team Summary, Player Grades, Statcast, Stats to Improve, Trade Targets, Schedule, Simulation) plus an appended row in `data/history.parquet` for tracking trends over time in Power BI.
+
+For a standalone, higher-resolution playoff-odds estimate:
+```
+python montecarlo.py --sims 5000
+```
+
+For free-agent and internal roster recommendations:
+```
+python free_agent_recs.py
+```
+
+For real, near-MLB-ready minor-league talent (excludes anyone already on the active roster):
+```
+python minor_league_shortlist.py
+```
+
+## Offseason workflow
+
+```
+python main.py --refresh --print-only    # refresh data and grades without writing the Excel report
+python offseason_report.py               # where the team is weakest, by position and stat
+python weakness_targets.py               # candidates ranked by fit to those weaknesses
+python -m streamlit run story_app.py     # the same, as an app
+python mlb_free_agents.py                # after the World Series: fills data/inputs/free_agents.csv
+```
+
+The free-agent list only exists after the World Series. Market prices in `data/inputs/free_agent_market.csv` are entered by hand.
+
+## Starting-pitcher studies (2025 vs 2026) and ABS
+
+A set of small, self-contained studies built on MLB's public Stats API play-by-play and Baseball Savant's
+manual leaderboard downloads. They answer: *when should a Mariners starter come out, and why did some
+starters slip from 2025 to 2026?*
+
+**Data and limits.** Play-by-play comes from `statsapi.mlb.com` (one request per game, cached on disk,
+with a pause between requests and a descriptive user-agent). ABS leaderboards are downloaded by hand from
+Baseball Savant. Samples are small (17-32 starts per pitcher), numbers are raw (no park, opponent or
+defense adjustment), and everything below is a pattern worth watching, not proof of cause.
+
+| Script | What it does |
+|---|---|
+| `pitch_count_study.py` | Opponent OPS by pitch count, inning and times through the order; fastball velocity by start. Caches every game. |
+| `compare_seasons.py` | Every starter, 2025 -> 2026: workload, results, velocity, innings, times through the order. |
+| `pitchmix_babip.py` | Pitch mix by pitch type, and BABIP / hard-hit rate against. |
+| `whiff_by_pitch.py` | Whiff, called+swinging strike, zone and chase rates per pitch type. |
+| `pitchshape.py` | Spin, movement, extension, release and location per pitch type; lists pitches that lost whiffs and what changed with them. |
+| `release_timeline.py` | Release point by start; dates the biggest shift and says whether it fell at a season boundary. |
+| `abs_analysis.py` | ABS challenge results for Mariners hitters, catchers and teams from the Savant downloads. |
+
+```
+python pitch_count_study.py          # first run downloads the season (about 1-2 minutes), then it is cached
+python compare_seasons.py            # 2025 vs 2026 (add --a/--b for other years)
+python pitchmix_babip.py
+python whiff_by_pitch.py
+python pitchshape.py
+python release_timeline.py
+python abs_analysis.py               # needs the Savant CSVs in data/inputs
+```
+
+### What they found
+
+- **Pitch count is not the signal.** Opponent OPS does not climb through about 100 pitches, and starters rarely
+  go past it. The weak spots are the 6th inning and the third time through the order (OPS against .695 / .701 / .751
+  the first, second and third time). Castillo is the exception: his trouble comes early (pitches 26-50, innings 3-4).
+- **Velocity is not a "take him out" signal either.** Starts 1+ mph below a pitcher's own median allowed 2.91 runs per
+  27 batters, against 3.01 in normal starts, and 54 of 138 starts lose 1+ mph from the first to the last 25 pitches
+  with nothing wrong (Kirby and Gilbert do it almost every start).
+- **The staff barely slipped; four starters did.** Staff OPS against went from .700 to .710 and runs per 27 batters from
+  2.86 to 2.93, with hard contact down 3.4 points. Kirby, Woo, Castillo and Gilbert lost strikeouts (Kirby's whiff rate
+  26.7% -> 22.4%) while Hancock and Miller, who rebuilt their pitch mix, improved.
+- **Where it went wrong.** Castillo's slider lost 11 points of whiff rate (36.5% -> 25.5%) and is thrown in the zone far more
+  often (38.8% -> 51.4%). Woo's 2025 BABIP (.239) was unusually low and moved to .285. Gilbert threw fewer of his best
+  strikeout pitches while his release point drifted about 9 inches over the season. Release-point shifts happened on
+  different dates for different pitchers, so they are not a tracking recalibration.
+- **ABS.** Challenges cost the Mariners roughly a quarter of a win, partly through challenges not taken
+  (runs taken 24.3% vs 28.3% for the league) rather than bad challenges.
+
+### Caveats
+
+Starters are pulled when they tire (selection bias), runs include unearned runs, and several pitch-level comparisons rest on
+a modest number of swings. Treat each result as a lead to check with more data.
+
+`data/` is git-ignored: the scripts rebuild their cache, and Savant CSVs are downloaded by hand.
+
+## Future opportunities
+
+- Fold minor-league shortlist candidates into the free-agent recommendation scoring, so "sign a free agent," "promote a prospect," and "play the bench guy we already have" are one ranked list instead of three separate tools
+- Compare against previous seasons (multi-year player and team trend analysis; the starting-pitcher studies already do this for pitching)
+- Backtest the rest-of-season projection system against the actual final outcome once the season ends
+- Extend payroll data (`payroll.py`) into genuine value-per-dollar analysis
+- Check whether the offense or the pitching explains the 2025-to-2026 change in results (runs scored and allowed, record vs. expected record)
+- Decide the fate of the trade-deadline-specific code (see note above) before next season's stretch run
+
+## Data sources
+
+| What | Source | File |
+|---|---|---|
+| Standings, schedules, rosters, player/team stats, minor leagues, platoon splits | [MLB Stats API](https://statsapi.mlb.com) via `MLB-StatsAPI` | `mlb_api.py` and the modules built on it |
+| Pitch-by-pitch play-by-play (pitch counts, velocity, spin, release, results) | [MLB Stats API](https://statsapi.mlb.com), cached per game | `pitch_count_study.py` and the studies built on it |
+| Statcast (xwOBA, Barrel%, Whiff%), fielding runs (Outs Above Average) | [Baseball Savant](https://baseballsavant.mlb.com) | `statcast_scraper.py`, `mlb_api.py`, `team_half_splits.py` |
+| Free agent class | Your list, or MLB's free-agent list | `data/inputs/free_agents.csv` |
+| Free agent prices (last salary, contract type) | Your list | `data/inputs/free_agent_market.csv` |
+| Payroll | Your list | `data/inputs/payroll_players.csv`, `data/inputs/payroll_league.csv` |
+| Top prospect rankings | Your list | `data/inputs/top_prospects.csv` |
+| ABS challenges | Baseball Savant ABS leaderboard, "Download CSV" by hand (batter, catcher, batting-team and fielding-team views) | `data/inputs/abs*.csv`, read by `abs_analysis.py` |
+
+Blank CSV templates with the right column headers are created in `data/inputs/` the first time each feature runs; anything left empty is skipped gracefully. Data is not included in this repository (`data/` is git-ignored) — run `python main.py --refresh` to build it locally.
+
+MLB data © MLB Advanced Media, L.P. Use is personal and non-commercial, per MLB's [copyright notice](http://gdx.mlb.com/components/copyright.txt).
+
+### About WAR
+
+WAR here is calculated by this project (`mlb_api.py`), not taken from another site, so numbers will be close to but not identical to other published WAR figures:
+
+- **Batters:** (batting runs from wOBA + baserunning runs + Statcast fielding runs + positional adjustment + replacement runs) ÷ runs per win
+- **Pitchers:** runs allowed per 9 vs. a league baseline adjusted for role (starter/reliever) and the team's defense, compared to a replacement-level pitcher; relievers are scaled by an estimated leverage

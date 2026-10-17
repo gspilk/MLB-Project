@@ -1,0 +1,897 @@
+"""
+output_report.py
+Generates the Excel report from all analysis.
+
+Sheets:
+  1. Team Summary      — diagnosis + standings + outlook
+  2. Player Grades     — every player graded
+  3. Statcast          — xwOBA + luck analysis
+  4. Stats to Improve  — ranked weaknesses + fixes
+  5. Roster Moves      — immediate + deadline
+  6. Schedule          — next 7 + remaining games
+
+Usage:
+    from output_report import generate_report
+    generate_report(data, analysis, grades, recs)
+"""
+
+import os
+import pandas as pd
+from datetime import date
+from openpyxl import Workbook
+from openpyxl.styles import (Font, PatternFill, Alignment,
+                              Border, Side)
+from openpyxl.utils import get_column_letter
+
+OUTPUT_DIR  = os.path.join(os.path.dirname(__file__), "output")
+OUTPUT_FILE = os.path.join(OUTPUT_DIR,
+    f"mariners_report_{date.today().strftime('%Y%m%d')}.xlsx")
+
+HISTORY_PATH        = os.path.join(os.path.dirname(__file__), "data", "history.parquet")
+PLAYER_HISTORY_PATH = os.path.join(os.path.dirname(__file__), "data", "player_history.parquet")
+
+NAVY     = "1B2A4A"
+TEAL     = "005C5C"
+GOLD     = "C4A535"
+WHITE    = "FFFFFF"
+LGRAY    = "F2F2F2"
+DGRAY    = "CCCCCC"
+GREEN    = "D4EDDA"
+YELLOW   = "FFF3CD"
+RED      = "F8D7DA"
+ORANGE   = "FFE5CC"
+
+GRADE_COLORS = {
+    "Elite":                     GREEN,
+    "Above Average":             "E8F5E9",
+    "Average":                   LGRAY,
+    "Below Average":             YELLOW,
+    "Below Average — developing":YELLOW,
+    "Small sample":              LGRAY,
+    "DFA":                       RED,
+    "Unknown":                   LGRAY,
+    "Limited — injured/inactive":LGRAY,
+}
+
+
+def _header(ws, row, col, value, bg=NAVY, fg=WHITE,
+            bold=True, size=11, wrap=False):
+    cell = ws.cell(row=row, column=col, value=value)
+    cell.font      = Font(bold=bold, color=fg, size=size, name="Arial")
+    cell.fill      = PatternFill("solid", start_color=bg)
+    cell.alignment = Alignment(horizontal="center",
+                               vertical="center",
+                               wrap_text=wrap)
+    return cell
+
+
+def _cell(ws, row, col, value, bold=False, color=None,
+          align="left", fmt=None):
+    cell = ws.cell(row=row, column=col, value=value)
+    cell.font      = Font(bold=bold, name="Arial", size=10)
+    cell.alignment = Alignment(horizontal=align, vertical="center")
+    if color:
+        cell.fill = PatternFill("solid", start_color=color)
+    if fmt:
+        cell.number_format = fmt
+    return cell
+
+
+def _title(ws, row, text, span=8):
+    ws.merge_cells(start_row=row, start_column=1,
+                   end_row=row, end_column=span)
+    cell = ws.cell(row=row, column=1, value=text)
+    cell.font      = Font(bold=True, size=14, color=WHITE, name="Arial")
+    cell.fill      = PatternFill("solid", start_color=NAVY)
+    cell.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[row].height = 28
+
+
+def _subtitle(ws, row, text, span=8, bg=TEAL):
+    ws.merge_cells(start_row=row, start_column=1,
+                   end_row=row, end_column=span)
+    cell = ws.cell(row=row, column=1, value=text)
+    cell.font      = Font(bold=True, size=11, color=WHITE, name="Arial")
+    cell.fill      = PatternFill("solid", start_color=bg)
+    cell.alignment = Alignment(horizontal="left", vertical="center",
+                               indent=1)
+    ws.row_dimensions[row].height = 20
+
+
+def _set_col_widths(ws, widths: list):
+    for i, w in enumerate(widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+
+def _grade_color(grade: str) -> str:
+    base = grade.split("—")[0].strip()
+    return GRADE_COLORS.get(grade, GRADE_COLORS.get(base, LGRAY))
+
+
+def _sheet_summary(wb: Workbook, d: dict, ou: dict, data: dict = None):
+    ws = wb.create_sheet("Team Summary")
+    ws.sheet_view.showGridLines = False
+    _set_col_widths(ws, [22, 18, 18, 18, 18, 18, 18, 18])
+
+    r = 1
+    _title(ws, r, f"SEATTLE MARINERS — MIDSEASON REPORT  |  {date.today()}", 8)
+    r += 1
+
+    _subtitle(ws, r, "OVERALL GRADE", 8)
+    r += 1
+    labels = ["Grade", "Verdict", "Record", "Div Rank",
+              "MLB Rank", "Proj Wins", "Floor", "Ceiling"]
+    for i, l in enumerate(labels, 1):
+        _header(ws, r, i, l, bg=TEAL, size=10)
+    r += 1
+    vals = [
+        d.get("grade"), d.get("verdict"), d.get("record"),
+        f"{d.get('div_rank')}/5", f"{d.get('mlb_rank')}/30",
+        d.get("projected_wins"), d.get("floor"), d.get("ceiling")
+    ]
+    for i, v in enumerate(vals, 1):
+        _cell(ws, r, i, v, bold=True, align="center",
+              color=GREEN if d.get("grade","").startswith("A") else LGRAY)
+    r += 2
+
+    _subtitle(ws, r, "STANDINGS & LUCK", 8)
+    r += 1
+    stat_rows = [
+        ("Record",        d.get("record")),
+        ("Win %",         d.get("win_pct")),
+        ("Luck",          d.get("luck")),
+        ("Pythagorean W-L",d.get("pythag")),
+        ("1-Run Record",  d.get("one_run")),
+        ("vs LHP",        d.get("vlhp")),
+        ("Last 10",       d.get("last10")),
+        ("Last 30",       d.get("last30")),
+    ]
+    _header(ws, r, 1, "Stat", bg=DGRAY, fg="000000", size=10)
+    _header(ws, r, 2, "Value", bg=DGRAY, fg="000000", size=10)
+    r += 1
+    for label, val in stat_rows:
+        _cell(ws, r, 1, label, bold=True)
+        _cell(ws, r, 2, val, align="center")
+        r += 1
+    r += 1
+
+    _subtitle(ws, r, "TEAM GRADES", 8)
+    r += 1
+    grade_rows = [
+        ("Offense",  d.get("offense_grade")),
+        ("Rotation", d.get("rotation_grade")),
+        ("Bullpen",  d.get("bullpen_grade")),
+        ("Team ERA", f"{d.get('team_era')}  (rank {d.get('era_rank')}/30)"),
+    ]
+    for label, val in grade_rows:
+        _cell(ws, r, 1, label, bold=True)
+        color = _grade_color(str(val)) if val else LGRAY
+        _cell(ws, r, 2, val, align="center", color=color)
+        r += 1
+    r += 1
+
+    _subtitle(ws, r, "SEASON OUTLOOK", 8)
+    r += 1
+    outlook_rows = [
+        ("Most likely",   ou.get("most_likely")),
+        ("Floor",         f"{ou.get('floor')} wins"),
+        ("Ceiling",       f"{ou.get('ceiling')} wins"),
+        ("Division",      ou.get("division")),
+        ("Playoff path",  ou.get("playoff_path")),
+    ]
+    for label, val in outlook_rows:
+        _cell(ws, r, 1, label, bold=True)
+        ws.merge_cells(start_row=r, start_column=2,
+                       end_row=r, end_column=8)
+        c = ws.cell(row=r, column=2, value=val)
+        c.font      = Font(name="Arial", size=10)
+        c.alignment = Alignment(horizontal="left", wrap_text=True)
+        ws.row_dimensions[r].height = 30
+        r += 1
+    r += 1
+
+    if data is not None:
+        _add_game_results_chart(wb, ws, r, data)
+
+
+def _add_game_results_chart(wb: Workbook, ws, start_row: int, data: dict) -> None:
+    from openpyxl.chart import LineChart, Reference
+
+    completed = data.get("schedule", {}).get("completed")
+    if completed is None or completed.empty:
+        return
+    if not all(c in completed.columns for c in ["W/L", "Date"]):
+        return
+
+    df = completed.copy()
+    df = df.dropna(subset=["W/L"])
+    if df.empty:
+        return
+
+    is_win = df["W/L"].astype(str).str.startswith("W")
+    cum_wins = is_win.cumsum()
+    game_num = range(1, len(df) + 1)
+    cum_win_pct = [w / g for w, g in zip(cum_wins, game_num)]
+
+    r = start_row
+    _subtitle(ws, r, "SEASON TREND — CUMULATIVE WIN %", 8)
+    r += 1
+    ws.cell(row=r, column=1, value="Game #")
+    ws.cell(row=r, column=2, value="Win %")
+    data_start_row = r + 1
+    for i, pct in zip(game_num, cum_win_pct):
+        r += 1
+        ws.cell(row=r, column=1, value=i)
+        ws.cell(row=r, column=2, value=round(pct, 4))
+    data_end_row = r
+
+    chart = LineChart()
+    chart.title = "Cumulative Win % Over the Season"
+    chart.style = 2
+    chart.varyColors = False
+    chart.y_axis.title = "Win %"
+    chart.x_axis.title = "Game #"
+    chart.y_axis.scaling.min = 0
+    chart.y_axis.scaling.max = 1
+    chart.height = 8
+    chart.width = 20
+    chart.legend = None
+
+    for axis in (chart.x_axis, chart.y_axis):
+        axis.delete = False
+        axis.majorTickMark = "out"
+        axis.tickLblPos = "nextTo"
+    chart.x_axis.tickLblSkip = 10
+    chart.x_axis.tickMarkSkip = 10
+
+    values = Reference(ws, min_col=2, min_row=data_start_row - 1, max_row=data_end_row)
+    chart.add_data(values, titles_from_data=True)
+    categories = Reference(ws, min_col=1, min_row=data_start_row, max_row=data_end_row)
+    chart.set_categories(categories)
+
+    chart.series[0].graphicalProperties.line.solidFill = "1F77B4"
+    chart.series[0].graphicalProperties.line.width = 20000
+
+    anchor_col = get_column_letter(3)
+    ws.add_chart(chart, f"{anchor_col}{start_row}")
+
+
+def _sheet_grades(wb: Workbook, grades: dict):
+    ws = wb.create_sheet("Player Grades")
+    ws.sheet_view.showGridLines = False
+
+    r = 1
+    _title(ws, r, "PLAYER GRADES", 10)
+    r += 1
+
+    _subtitle(ws, r, "BATTERS", 10)
+    r += 1
+    bat_headers = ["Name","Grade","Role","PA","OPS","xwOBA",
+                   "Luck","HR","WAR","Action"]
+    _set_col_widths(ws, [26,22,10,6,7,7,7,5,6,45])
+    for i, h in enumerate(bat_headers, 1):
+        _header(ws, r, i, h, size=10)
+    r += 1
+
+    for g in grades.get("batters", []):
+        color = _grade_color(g.get("grade",""))
+        _cell(ws, r, 1, g["name"], bold=True, color=color)
+        _cell(ws, r, 2, g["grade"], color=color)
+        _cell(ws, r, 3, g.get("role",""), color=color, align="center")
+        _cell(ws, r, 4, g.get("PA"), color=color, align="center")
+        _cell(ws, r, 5, g.get("OPS"), color=color, align="center",
+              fmt="0.000")
+        _cell(ws, r, 6, g.get("xwOBA"), color=color, align="center",
+              fmt="0.000")
+        luck = g.get("luck")
+        luck_color = GREEN if luck and luck < -0.020 else \
+                     RED if luck and luck > 0.020 else color
+        _cell(ws, r, 7, luck, color=luck_color, align="center", fmt="+0.000;-0.000;0.000")
+        _cell(ws, r, 8, g.get("HR"), color=color, align="center")
+        _cell(ws, r, 9, g.get("WAR"), color=color, align="center",
+              fmt="0.0")
+        _cell(ws, r, 10, g.get("action",""), color=color)
+        r += 1
+
+    r += 1
+    _subtitle(ws, r, "PITCHERS", 10)
+    r += 1
+    pit_headers = ["Name","Role","Grade","IP","ERA","WHIP",
+                   "K/9","xwOBA vs","Luck","WAR","Action"]
+    pit_widths = [26,5,20,7,7,7,6,8,7,6,45]
+    for i, (h, w) in enumerate(zip(pit_headers, pit_widths), 1):
+        _header(ws, r, i, h, size=10)
+        ws.column_dimensions[get_column_letter(i)].width = w
+    r += 1
+
+    for g in grades.get("pitchers", []):
+        color = _grade_color(g.get("grade",""))
+        _cell(ws, r, 1,  g["name"], bold=True, color=color)
+        _cell(ws, r, 2,  g.get("role",""), color=color, align="center")
+        _cell(ws, r, 3,  g.get("grade",""), color=color)
+        _cell(ws, r, 4,  g.get("IP"), color=color, align="center", fmt="0.0")
+        _cell(ws, r, 5,  g.get("ERA"), color=color, align="center", fmt="0.00")
+        _cell(ws, r, 6,  g.get("WHIP"), color=color, align="center", fmt="0.000")
+        _cell(ws, r, 7,  g.get("K/9"), color=color, align="center", fmt="0.0")
+        _cell(ws, r, 8,  g.get("xwOBA_against"), color=color,
+              align="center", fmt="0.000")
+        luck = g.get("luck")
+        luck_color = GREEN if luck and luck > 0.020 else \
+                     RED if luck and luck < -0.020 else color
+        _cell(ws, r, 9,  luck, color=luck_color, align="center",
+              fmt="+0.000;-0.000;0.000")
+        _cell(ws, r, 10, g.get("WAR"), color=color, align="center", fmt="0.0")
+        _cell(ws, r, 11, g.get("action",""), color=color)
+        r += 1
+
+
+def _sheet_statcast(wb: Workbook, data: dict):
+    ws = wb.create_sheet("Statcast")
+    ws.sheet_view.showGridLines = False
+    _set_col_widths(ws, [26,6,7,7,7,8,7,8,6])
+
+    r = 1
+    _title(ws, r, "STATCAST ANALYSIS", 9)
+    r += 1
+
+    _subtitle(ws, r, "BATTER STATCAST", 9)
+    r += 1
+    headers = ["Name","PA","wOBA","xwOBA","Luck","Barrel%","HardHit%","EV50","K%"]
+    for i, h in enumerate(headers, 1):
+        _header(ws, r, i, h, size=10)
+    r += 1
+
+    sea_bat = data.get("statcast",{}).get("bat_luck", pd.DataFrame())
+    if not sea_bat.empty:
+        sea_bat_sorted = sea_bat.sort_values("xwOBA", ascending=False) \
+                         if "xwOBA" in sea_bat.columns else sea_bat
+        for _, row in sea_bat_sorted.iterrows():
+            luck    = row.get("luck_gap")
+            verdict = str(row.get("verdict",""))
+            color   = GREEN if "UNLUCKY" in verdict else \
+                      RED   if "LUCKY"   in verdict else LGRAY
+            _cell(ws, r, 1, row.get("Name",""), bold=True)
+            _cell(ws, r, 2, row.get("PA"), align="center")
+            _cell(ws, r, 3, row.get("wOBA"), align="center", fmt="0.000")
+            _cell(ws, r, 4, row.get("xwOBA"), align="center",
+                  fmt="0.000", color=color)
+            _cell(ws, r, 5, luck, align="center",
+                  fmt="+0.000;-0.000;0.000", color=color)
+            _cell(ws, r, 6, row.get("Barrel%"), align="center", fmt="0.0")
+            _cell(ws, r, 7, row.get("HardHit%"), align="center", fmt="0.0")
+            _cell(ws, r, 8, row.get("EV50"), align="center", fmt="0.0")
+            _cell(ws, r, 9, row.get("K%"), align="center", fmt="0.0")
+            r += 1
+
+    r += 1
+    _subtitle(ws, r, "PITCHER STATCAST", 9)
+    r += 1
+    pit_headers = ["Name","BF","wOBA vs","xwOBA vs","Luck","K%","Whiff%","HardHit% vs","Barrel% vs"]
+    for i, h in enumerate(pit_headers, 1):
+        _header(ws, r, i, h, size=10)
+    r += 1
+
+    sea_pit = data.get("statcast",{}).get("pit_luck", pd.DataFrame())
+    if not sea_pit.empty:
+        xwa = "xwOBA_against"
+        sea_pit_sorted = sea_pit.sort_values(xwa) \
+                         if xwa in sea_pit.columns else sea_pit
+        for _, row in sea_pit_sorted.iterrows():
+            luck    = row.get("luck_gap")
+            verdict = str(row.get("verdict",""))
+            color   = GREEN if "UNLUCKY" in verdict else \
+                      RED   if "LUCKY"   in verdict else LGRAY
+            _cell(ws, r, 1, row.get("Name",""), bold=True)
+            _cell(ws, r, 2, row.get("PA",row.get("BF")), align="center")
+            _cell(ws, r, 3, row.get("wOBA_against"), align="center", fmt="0.000")
+            _cell(ws, r, 4, row.get(xwa), align="center",
+                  fmt="0.000", color=color)
+            _cell(ws, r, 5, luck, align="center",
+                  fmt="+0.000;-0.000;0.000", color=color)
+            _cell(ws, r, 6, row.get("K%"), align="center", fmt="0.0")
+            _cell(ws, r, 7, row.get("Whiff%"), align="center", fmt="0.0")
+            _cell(ws, r, 8, row.get("HardHit%_against",
+                                    row.get("HardHit%")), align="center", fmt="0.0")
+            _cell(ws, r, 9, row.get("Barrel%_against",
+                                    row.get("Barrel%")), align="center", fmt="0.0")
+            r += 1
+
+
+def _sheet_stats(wb: Workbook, stats: list):
+    ws = wb.create_sheet("Stats to Improve")
+    ws.sheet_view.showGridLines = False
+    _set_col_widths(ws, [12,12,10,8,8,12,50])
+
+    r = 1
+    _title(ws, r, "STATS TO IMPROVE", 7)
+    r += 1
+
+    headers = ["Priority","Category","Stat","Value","Rank","Internal Fix?","Recommended Fix"]
+    for i, h in enumerate(headers, 1):
+        _header(ws, r, i, h, size=10)
+    r += 1
+
+    for s in stats:
+        color = RED if s["priority"] == "HIGH" else YELLOW
+        _cell(ws, r, 1, s["priority"], bold=True, color=color, align="center")
+        _cell(ws, r, 2, s["category"], color=color)
+        _cell(ws, r, 3, s["stat"], bold=True, color=color)
+        _cell(ws, r, 4, s["value"], color=color, align="center")
+        _cell(ws, r, 5, f"{s['rank']}/{s['total']}", color=color, align="center")
+        internal = "✓ Yes" if s["internal"] else "→ External"
+        _cell(ws, r, 6, internal, color=GREEN if s["internal"] else ORANGE,
+              align="center")
+        fix_cell = ws.cell(row=r, column=7, value=s["fix"])
+        fix_cell.font      = Font(name="Arial", size=10)
+        fix_cell.fill      = PatternFill("solid", start_color=color)
+        fix_cell.alignment = Alignment(wrap_text=True)
+        ws.row_dimensions[r].height = 30
+        r += 1
+
+
+def _sheet_moves(wb: Workbook, im: list, dl: dict):
+    ws = wb.create_sheet("Roster Moves")
+    ws.sheet_view.showGridLines = False
+    _set_col_widths(ws, [14,14,28,50])
+
+    r = 1
+    _title(ws, r, "ROSTER MOVES", 4)
+    r += 1
+
+    _subtitle(ws, r, "IMMEDIATE MOVES", 4)
+    r += 1
+    for i, h in enumerate(["Urgency","Type","Player","Reason"], 1):
+        _header(ws, r, i, h, size=10)
+    r += 1
+
+    URGENCY_COLOR = {
+        "IMMEDIATE":  RED,
+        "SOON":       ORANGE,
+        "WHEN READY": YELLOW,
+    }
+    for m in im:
+        color = URGENCY_COLOR.get(m["urgency"], LGRAY)
+        _cell(ws, r, 1, m["urgency"], bold=True, color=color, align="center")
+        _cell(ws, r, 2, m["type"], color=color, align="center")
+        _cell(ws, r, 3, m["player"], bold=True, color=color)
+        _cell(ws, r, 4, m["reason"], color=color)
+        r += 1
+
+    r += 1
+    _subtitle(ws, r, "DEADLINE STRATEGY", 4)
+    r += 1
+    ws.merge_cells(start_row=r, start_column=1,
+                   end_row=r, end_column=4)
+    c = ws.cell(row=r, column=1, value=dl.get("strategy",""))
+    c.font      = Font(name="Arial", size=10, italic=True)
+    c.fill      = PatternFill("solid", start_color=LGRAY)
+    c.alignment = Alignment(wrap_text=True, indent=1)
+    ws.row_dimensions[r].height = 40
+    r += 2
+
+    _subtitle(ws, r, "DEADLINE TARGETS", 4, bg=TEAL)
+    r += 1
+    for t in dl.get("targets", []):
+        items = [
+            ("Position",  t.get("position","")),
+            ("Profile",   t.get("profile","")),
+            ("Cost",      t.get("cost","")),
+            ("Urgency",   t.get("urgency","")),
+            ("Why",       t.get("why","")),
+        ]
+        for label, val in items:
+            _cell(ws, r, 1, label, bold=True, color=LGRAY)
+            ws.merge_cells(start_row=r, start_column=2,
+                           end_row=r, end_column=4)
+            c = ws.cell(row=r, column=2, value=val)
+            c.font      = Font(name="Arial", size=10)
+            c.fill      = PatternFill("solid", start_color=LGRAY)
+            c.alignment = Alignment(wrap_text=True)
+            r += 1
+        r += 1
+
+    _subtitle(ws, r, "DO NOT TRADE", 4, bg="8B0000")
+    r += 1
+    for p in dl.get("do_not_trade", []):
+        ws.merge_cells(start_row=r, start_column=1,
+                       end_row=r, end_column=4)
+        c = ws.cell(row=r, column=1, value=f"✗  {p}")
+        c.font      = Font(name="Arial", size=10, bold=True)
+        c.fill      = PatternFill("solid", start_color=RED)
+        c.alignment = Alignment(indent=1)
+        r += 1
+
+    r += 1
+    if dl.get("sell"):
+        _subtitle(ws, r, "SELL CANDIDATES", 4, bg=GOLD)
+        r += 1
+        for s in dl["sell"]:
+            _cell(ws, r, 1, s["player"], bold=True, color=YELLOW)
+            ws.merge_cells(start_row=r, start_column=2,
+                           end_row=r, end_column=4)
+            c = ws.cell(row=r, column=2,
+                        value=f"{s['reason']}  |  Note: {s.get('note','')}")
+            c.font      = Font(name="Arial", size=10)
+            c.fill      = PatternFill("solid", start_color=YELLOW)
+            c.alignment = Alignment(wrap_text=True)
+            ws.row_dimensions[r].height = 30
+            r += 1
+
+
+def _sheet_schedule(wb: Workbook, data: dict):
+    ws = wb.create_sheet("Schedule")
+    ws.sheet_view.showGridLines = False
+    _set_col_widths(ws, [6,12,8,12,10,10,10,10])
+
+    r = 1
+    _title(ws, r, "SCHEDULE", 8)
+    r += 1
+
+    _subtitle(ws, r, "NEXT 7 GAMES", 8)
+    r += 1
+    for i, h in enumerate(["#","Date","H/A","Opponent",
+                            "Result","W","L","Notes"], 1):
+        _header(ws, r, i, h, size=10)
+    r += 1
+
+    next7 = data.get("schedule",{}).get("next7", pd.DataFrame())
+    if next7 is not None and not next7.empty:
+        for _, row in next7.iterrows():
+            checked = row.get("checked", False)
+            color   = GREEN if checked else LGRAY
+            _cell(ws, r, 1, "☑" if checked else "☐",
+                  align="center", color=color)
+            _cell(ws, r, 2, str(row.get("date",""))[:10], color=color)
+            _cell(ws, r, 3, row.get("home_away",""), align="center", color=color)
+            _cell(ws, r, 4, row.get("Opp",""), color=color)
+            _cell(ws, r, 5, row.get("W-L",""), align="center", color=color)
+            _cell(ws, r, 6, row.get("W",""), align="center", color=color)
+            _cell(ws, r, 7, row.get("L",""), align="center", color=color)
+            _cell(ws, r, 8, "", color=color)
+            r += 1
+
+    r += 1
+    _subtitle(ws, r, "REMAINING SCHEDULE", 8)
+    r += 1
+    for i, h in enumerate(["#","Date","H/A","Opponent",
+                            "Result","W","L","Notes"], 1):
+        _header(ws, r, i, h, size=10)
+    r += 1
+
+    remaining = data.get("schedule",{}).get("remaining", pd.DataFrame())
+    if remaining is not None and not remaining.empty:
+        bad_teams  = ["LAA","HOU","COL","MIA","DET","KC",
+                      "BAL","BOS","TOR","WSN"]
+        good_teams = ["TBR","NYY","LAD","MIL","CHC","ATL"]
+        for _, row in remaining.iterrows():
+            opp   = str(row.get("Opp",""))
+            color = GREEN  if any(t in opp for t in bad_teams)  else \
+                    RED    if any(t in opp for t in good_teams)  else \
+                    LGRAY
+            _cell(ws, r, 1, row.get("Gm#",""), align="center", color=color)
+            _cell(ws, r, 2, str(row.get("date",""))[:10], color=color)
+            _cell(ws, r, 3, row.get("home_away",""), align="center", color=color)
+            _cell(ws, r, 4, opp, color=color)
+            _cell(ws, r, 5, row.get("W-L",""), align="center", color=color)
+            _cell(ws, r, 6, row.get("W",""), align="center", color=color)
+            _cell(ws, r, 7, row.get("L",""), align="center", color=color)
+            _cell(ws, r, 8, "", color=color)
+            r += 1
+
+
+def _sheet_targets(wb: Workbook, targets: dict):
+    ws = wb.create_sheet("Trade Targets")
+    ws.sheet_view.showGridLines = False
+
+    r = 1
+    _title(ws, r, "MLB TRADE & WAIVER TARGETS", 9)
+    r += 1
+
+    _subtitle(ws, r, "1B/DH TARGETS — xwOBA .330+, Barrel% 8%+, non-contender", 9)
+    r += 1
+    bat_h = ["Name","Team","PA","xwOBA","Barrel%","HardHit%","HR","OPS","Fit"]
+    bat_w = [25,7,6,8,9,10,5,7,30]
+    _set_col_widths(ws, bat_w)
+    for i,(h,w) in enumerate(zip(bat_h,bat_w),1):
+        _header(ws, r, i, h, size=10)
+        ws.column_dimensions[get_column_letter(i)].width = w
+    r += 1
+
+    for p in targets.get("batter_targets",[])[:10]:
+        xw = pd.to_numeric(p.get("xwOBA"), errors="coerce")
+        color = GREEN if xw and xw >= 0.360 else                 "E8F5E9" if xw and xw >= 0.340 else LGRAY
+        _cell(ws, r, 1, p.get("name",""), bold=True, color=color)
+        _cell(ws, r, 2, p.get("team",""), color=color, align="center")
+        _cell(ws, r, 3, p.get("PA"), color=color, align="center")
+        _cell(ws, r, 4, p.get("xwOBA"), color=color, align="center", fmt="0.000")
+        _cell(ws, r, 5, p.get("Barrel%"), color=color, align="center", fmt="0.0")
+        _cell(ws, r, 6, p.get("HardHit%"), color=color, align="center", fmt="0.0")
+        _cell(ws, r, 7, p.get("HR"), color=color, align="center")
+        _cell(ws, r, 8, p.get("OPS"), color=color, align="center", fmt="0.000")
+        _cell(ws, r, 9, p.get("fit",""), color=color)
+        r += 1
+
+    r += 1
+    _subtitle(ws, r, "BULLPEN TARGETS — xwOBA against ≤.310, 20+ IP, non-contender", 9)
+    r += 1
+    pit_h = ["Name","Team","G","IP","ERA","WHIP","K%","xwOBA vs","Fit"]
+    pit_w = [25,7,5,6,7,7,6,9,30]
+    for i,(h,w) in enumerate(zip(pit_h,pit_w),1):
+        _header(ws, r, i, h, size=10)
+        ws.column_dimensions[get_column_letter(i)].width = w
+    r += 1
+
+    for p in targets.get("pitcher_targets",[])[:10]:
+        xw = pd.to_numeric(p.get("xwOBA_against"), errors="coerce")
+        color = GREEN if xw and xw <= 0.270 else                 "E8F5E9" if xw and xw <= 0.290 else LGRAY
+        _cell(ws, r, 1, p.get("name",""), bold=True, color=color)
+        _cell(ws, r, 2, p.get("team",""), color=color, align="center")
+        _cell(ws, r, 3, p.get("G"), color=color, align="center")
+        _cell(ws, r, 4, p.get("IP"), color=color, align="center", fmt="0.0")
+        _cell(ws, r, 5, p.get("ERA"), color=color, align="center", fmt="0.00")
+        _cell(ws, r, 6, p.get("WHIP"), color=color, align="center", fmt="0.000")
+        _cell(ws, r, 7, p.get("K%"), color=color, align="center", fmt="0.0")
+        _cell(ws, r, 8, p.get("xwOBA_against"), color=color, align="center", fmt="0.000")
+        _cell(ws, r, 9, p.get("fit",""), color=color)
+        r += 1
+
+def _sheet_simulation(wb, scenarios: dict, data: dict = None):
+    from simulator import project_division, compute_rival_projections
+    ws = wb.create_sheet("Deadline Simulation")
+    ws.sheet_view.showGridLines = False
+    _set_col_widths(ws, [48, 7, 7, 7, 8, 10, 25])
+
+    rival_projections = compute_rival_projections(data) if data is not None else None
+
+    r = 1
+    _title(ws, r, "DEADLINE ACQUISITION SIMULATOR", 7)
+    r += 1
+
+    _subtitle(ws, r, "SCENARIO SUMMARY", 7)
+    r += 1
+    headers = ["Scenario", "RS/G", "RA/G", "Win%", "Proj W", "Final", "Playoff"]
+    for i, h in enumerate(headers, 1):
+        _header(ws, r, i, h, size=10)
+    r += 1
+
+    PLAYOFF_COLORS = {
+        "division winner":       GREEN,
+        "wild card 1":           "C8E6C9",
+        "wild card 2":           "DCEDC8",
+        "wild card 3":           YELLOW,
+        "bubble":                YELLOW,
+        "miss":                  RED,
+    }
+
+    for key, s in scenarios.items():
+        div   = project_division(s["final_w"], rival_projections)
+        pos   = div["playoff_position"]
+        color = next((v for k, v in PLAYOFF_COLORS.items()
+                      if k in pos.lower()), LGRAY)
+        _cell(ws, r, 1, s["name"],      bold=True, color=color)
+        _cell(ws, r, 2, s["rs_g"],      color=color, align="center", fmt="0.00")
+        _cell(ws, r, 3, s["ra_g"],      color=color, align="center", fmt="0.00")
+        _cell(ws, r, 4, s["win_pct"],   color=color, align="center", fmt="0.000")
+        _cell(ws, r, 5, s["proj_wins"], color=color, align="center", fmt="0.0")
+        _cell(ws, r, 6, f"{round(s['final_w']):.0f}-{round(s['final_l']):.0f}", color=color, align="center")
+        _cell(ws, r, 7, pos,            color=color)
+        r += 1
+
+    r += 1
+
+    for key, s in scenarios.items():
+        div = project_division(s["final_w"], rival_projections)
+        _subtitle(ws, r, s["name"].upper(), 7, bg=TEAL)
+        r += 1
+
+        for label, val in [
+            ("RS/G",      s["rs_g"]),
+            ("RA/G",      s["ra_g"]),
+            ("Win%",      s["win_pct"]),
+            ("Luck wins", s["luck_wins"]),
+            ("Final W-L", f"{round(s['final_w']):.0f}-{round(s['final_l']):.0f}"),
+            ("Playoff",   div["playoff_position"]),
+            ("vs TEX",    f"{div['gap_to_tex']:+.0f} games"),
+            ("vs HOU",    f"{div['games_ahead_hou']:+.0f} games"),
+        ]:
+            _cell(ws, r, 1, label, bold=True, color=LGRAY)
+            ws.merge_cells(start_row=r, start_column=2, end_row=r, end_column=7)
+            c = ws.cell(row=r, column=2, value=val)
+            c.font = Font(name="Arial", size=10)
+            c.fill = PatternFill("solid", start_color=LGRAY)
+            r += 1
+
+        if s.get("impacts"):
+            for i, h in enumerate(["Factor","RS/G impact","RA/G impact","Note"], 1):
+                _header(ws, r, i, h, bg=DGRAY, fg="000000", size=10)
+            r += 1
+            for imp in s["impacts"]:
+                rs_c = GREEN if imp["rs"] > 0 else LGRAY
+                ra_c = GREEN if imp["ra"] < 0 else LGRAY
+                _cell(ws, r, 1, imp["source"], bold=True, color=LGRAY)
+                _cell(ws, r, 2,
+                      f"+{imp['rs']:.3f}" if imp["rs"] > 0 else "-",
+                      color=rs_c, align="center")
+                _cell(ws, r, 3,
+                      f"{imp['ra']:.3f}" if imp["ra"] < 0 else "-",
+                      color=ra_c, align="center")
+                _cell(ws, r, 4, imp["note"], color=LGRAY)
+                r += 1
+        r += 1
+
+
+def _append_history_row(d: dict, ou: dict, scenarios: dict = None) -> None:
+    # BUG FIX 2026-09-27: this row used to be missing the two numbers
+    # that actually matter most for a "how close were we to the
+    # playoffs, day by day" Power BI chart -- wc_games_back (the REAL
+    # games-back figure) and wc_gap were both already computed live
+    # every run (see standings_scraper.py / analyze_standings()) but
+    # never made it into the one place meant for tracking trends over
+    # time. Also adds buyer_seller (so you can see exactly which day
+    # the stance flipped) and the real RS/G, RA/G run environment
+    # (pulled from the simulator's baseline scenario, since those are
+    # the actual inputs to the luck/pythag math, not just the derived
+    # win_pct) and a same-day IL count for correlating slumps with
+    # injury waves.
+    baseline = (scenarios or {}).get("baseline", {})
+    row = {
+        "date":               date.today().isoformat(),
+        "record":             d.get("record"),
+        "win_pct":            d.get("win_pct"),
+        "grade":              d.get("grade"),
+        "verdict":            d.get("verdict"),
+        "projected_wins":     d.get("projected_wins"),
+        "floor":              d.get("floor"),
+        "ceiling":            d.get("ceiling"),
+        "luck":               d.get("luck"),
+        "pythag":             d.get("pythag"),
+        "offense_grade":      d.get("offense_grade"),
+        "rotation_grade":     d.get("rotation_grade"),
+        "bullpen_grade":      d.get("bullpen_grade"),
+        "team_era":           d.get("team_era"),
+        "era_rank":           d.get("era_rank"),
+        "div_rank":           d.get("div_rank"),
+        "mlb_rank":           d.get("mlb_rank"),
+        "wc_games_back":      d.get("wc_games_back"),
+        "wc_gap":             d.get("wc_gap"),
+        "buyer_seller":       d.get("buyer_seller"),
+        "rs_g":               baseline.get("rs_g"),
+        "ra_g":               baseline.get("ra_g"),
+        "il_count":           len(d.get("on_il") or []),
+        "most_likely_outlook": ou.get("most_likely"),
+    }
+
+    os.makedirs(os.path.dirname(HISTORY_PATH), exist_ok=True)
+    new_row = pd.DataFrame([row])
+
+    if os.path.exists(HISTORY_PATH):
+        try:
+            history = pd.read_parquet(HISTORY_PATH)
+            history = history[history["date"] != row["date"]]
+            history = pd.concat([history, new_row], ignore_index=True)
+        except Exception as e:
+            print(f"  [warn] could not read existing history.parquet ({e}) "
+                  f"-- starting a fresh history file")
+            history = new_row
+    else:
+        history = new_row
+
+    history = history.sort_values("date").reset_index(drop=True)
+    history.to_parquet(HISTORY_PATH, index=False)
+    print(f"[report] history updated: {HISTORY_PATH} ({len(history)} snapshots)")
+
+
+def _append_player_history_row(grades: dict) -> None:
+    """
+    NEW 2026-09-27: player_grades.py recomputes every player's grade/
+    WAR/xwOBA fresh on every run, but none of it was ever retained --
+    each run silently overwrote the last, so there was no way to chart
+    a player's arc over the season (e.g. Raleigh's or Miller's real
+    collapse-and-partial-recovery pattern), only see it after the fact
+    in a season recap. This snapshots one row per player per day into
+    a SEPARATE file from the team-level history.parquet (batters and
+    pitchers have genuinely different stat columns -- OPS/xwOBA vs.
+    ERA/xwOBA_against -- so this is intentionally a wide table with
+    real, expected nulls on whichever side doesn't apply, not the
+    kind of accidental cross-table schema pollution that caused real
+    bugs elsewhere in this project's caching).
+
+    Dedupes on (date, name, player_type) the same way _append_history_row
+    dedupes on date, so re-running --refresh twice in one day updates
+    that day's snapshot instead of duplicating it.
+    """
+    today = date.today().isoformat()
+    rows = []
+
+    for g in grades.get("batters", []):
+        rows.append({
+            "date": today, "player_type": "batter", "name": g.get("name"),
+            "grade": g.get("grade"), "role": g.get("role"), "action": g.get("action"),
+            "PA_or_IP": g.get("PA"), "rate_stat": g.get("OPS"),
+            "xwoba": g.get("xwOBA"), "WAR": g.get("WAR"), "luck": g.get("luck"),
+            "confidence": g.get("confidence"),
+        })
+
+    for g in grades.get("pitchers", []):
+        rows.append({
+            "date": today, "player_type": "pitcher", "name": g.get("name"),
+            "grade": g.get("grade"), "role": g.get("role"), "action": g.get("action"),
+            "PA_or_IP": g.get("IP"), "rate_stat": g.get("ERA"),
+            "xwoba": g.get("xwOBA_against"), "WAR": g.get("WAR"), "luck": g.get("luck"),
+            "confidence": g.get("confidence"),
+        })
+
+    if not rows:
+        return
+
+    os.makedirs(os.path.dirname(PLAYER_HISTORY_PATH), exist_ok=True)
+    new_rows = pd.DataFrame(rows)
+
+    if os.path.exists(PLAYER_HISTORY_PATH):
+        try:
+            history = pd.read_parquet(PLAYER_HISTORY_PATH)
+            # drop today's rows for any player being re-written this run
+            # (same-day re-refresh should update, not duplicate)
+            key = list(zip(new_rows["date"], new_rows["name"], new_rows["player_type"]))
+            existing_key = list(zip(history["date"], history["name"], history["player_type"]))
+            history = history[[k not in key for k in existing_key]]
+            history = pd.concat([history, new_rows], ignore_index=True)
+        except Exception as e:
+            print(f"  [warn] could not read existing player_history.parquet ({e}) "
+                  f"-- starting a fresh player history file")
+            history = new_rows
+    else:
+        history = new_rows
+
+    history = history.sort_values(["date", "player_type", "name"]).reset_index(drop=True)
+    history.to_parquet(PLAYER_HISTORY_PATH, index=False)
+    print(f"[report] player history updated: {PLAYER_HISTORY_PATH} "
+          f"({len(history)} player-snapshots)")
+
+
+def generate_report(data: dict, analysis: dict,
+                    grades: dict, recs: dict,
+                    scenarios: dict = None,
+                    output_path: str = None) -> str:
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    path = output_path or OUTPUT_FILE
+
+    print(f"\n[report] Generating Excel report...")
+
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    d  = recs["diagnosis"]
+    ou = recs["outlook"]
+    si = recs["stats_to_improve"]
+
+    _sheet_summary(wb, d, ou, data)
+    _sheet_grades(wb, grades)
+    _sheet_statcast(wb, data)
+    _sheet_stats(wb, si)
+    _sheet_targets(wb, recs.get("player_targets", {}))
+    _sheet_schedule(wb, data)
+    if scenarios:
+        _sheet_simulation(wb, scenarios, data)
+
+    wb.save(path)
+    print(f"[report] Saved: {path}")
+
+    _append_history_row(d, ou, scenarios)
+    _append_player_history_row(grades)
+
+    return path
+
+
+if __name__ == "__main__":
+    from data_builder import build_all
+    from team_analyzer import analyze_team
+    from player_grades import grade_players
+    from recommender   import generate_recommendations
+
+    data     = build_all(2026)
+    analysis = analyze_team(data)
+    grades   = grade_players(data)
+    recs     = generate_recommendations(data, analysis, grades)
+    path     = generate_report(data, analysis, grades, recs)
+    print(f"\nReport saved to: {path}")
