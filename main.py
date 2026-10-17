@@ -118,8 +118,11 @@ def main():
     print(f"{'='*65}")
     print(f"  Record:         {s.get('record')}")
     print(f"  Grade:          {o.get('grade')} -- {o.get('verdict')}")
-    print(f"  Projected wins: {o.get('projected_wins')}")
-    print(f"  Range:          {o.get('floor')}--{o.get('ceiling')} wins")
+    if o.get('floor') == o.get('ceiling'):
+        print(f"  Final wins:     {o.get('projected_wins')}")
+    else:
+        print(f"  Projected wins: {o.get('projected_wins')}")
+        print(f"  Range:          {o.get('floor')}--{o.get('ceiling')} wins")
     print(f"  Data as of:     {date.today()} (refresh with --refresh)")
     if path:
         print(f"  Report:         {path}")

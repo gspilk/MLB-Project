@@ -247,13 +247,40 @@ def analyze_pitching(data: dict) -> dict:
                 # instead of a hardcoded list of pitcher-name fragments that
                 # had to be hand-updated after every trade/call-up.
                 bullpen_df = get_bullpen(seattle_pit)
-                bullpen_keys = bullpen_df["Name"].apply(key_from_first_last).tolist() if not bullpen_df.empty else []
-                bp = sea_pit[sea_pit["_key"].isin(bullpen_keys)] if bullpen_keys else pd.DataFrame()
+                bullpen_keys_all = bullpen_df["Name"].apply(key_from_first_last).tolist() if not bullpen_df.empty else []
+                # real pitchers = 10+ IP (position players who pitched a
+                # blowout inning are left out of the grade)
+                bullpen_keys = bullpen_keys_all
+                if not bullpen_df.empty and "IP" in bullpen_df.columns:
+                    ip_ok = pd.to_numeric(bullpen_df["IP"], errors="coerce") >= 10
+                    bullpen_keys = bullpen_df[ip_ok]["Name"].apply(key_from_first_last).tolist()
+                bp     = sea_pit[sea_pit["_key"].isin(bullpen_keys)] if bullpen_keys else pd.DataFrame()
+                bp_all = sea_pit[sea_pit["_key"].isin(bullpen_keys_all)] if bullpen_keys_all else pd.DataFrame()
             else:
-                bp = pd.DataFrame()
+                bp = bp_all = pd.DataFrame()
+
+            def _bp_xwoba(df):
+                # weight by batters faced so a 3-IP cameo does not count as
+                # much as a 65-IP setup man (plain mean if no BF/PA column)
+                val = df[xwoba_col].mean()
+                wcol = next((c for c in ("BF", "PA") if c in df.columns), None)
+                if wcol:
+                    xw = pd.to_numeric(df[xwoba_col], errors="coerce")
+                    bf = pd.to_numeric(df[wcol], errors="coerce")
+                    ok = xw.notna() & bf.notna() & (bf > 0)
+                    if ok.any():
+                        val = (xw[ok] * bf[ok]).sum() / bf[ok].sum()
+                return val
 
             if not bp.empty:
-                avg_bp_xwoba = bp[xwoba_col].mean()
+                avg_bp_xwoba = _bp_xwoba(bp)
+                line = (f"Bullpen xwOBA {avg_bp_xwoba:.3f} -- pitchers only "
+                        f"({len(bp)} arms, 10+ IP)")
+                if len(bp_all) > len(bp):
+                    line += (f"; {_bp_xwoba(bp_all):.3f} incl. position players "
+                             f"({len(bp_all)} total)")
+                line += f"; {XWOBA_P_AVERAGE:.3f} = average line"
+                result["flags"].append(line)
                 if avg_bp_xwoba <= XWOBA_P_ELITE:
                     result["bullpen_grade"] = "Elite"
                     result["strengths"].append(
@@ -327,7 +354,7 @@ def analyze_pitching(data: dict) -> dict:
                 if era > 5.00 and ip >= 8:
                     result["concerns"].append(
                         f"{name}: ERA {era:.2f} reliever"
-                        f" — {ip:.1f} IP, {g} appearances"
+                        f" — {ip:.1f} IP, {int(g)} appearances"
                     )
                 elif bb / ip * 9 > 4.5 and ip >= 8:
                     result["concerns"].append(
@@ -655,6 +682,9 @@ def overall_grade(offense: dict, pitching: dict,
         projected_wins = w + int(games_remaining * projected_pct)
     except Exception:
         projected_wins = 88
+    season_done = games_remaining == 0
+    if season_done:
+        projected_wins = w   # nothing left to project -- wins are final
 
     # BUG FIX 2026-09-26: grade/verdict above come purely from an average
     # of component quality (offense/rotation/bullpen), with zero awareness
@@ -722,8 +752,8 @@ def overall_grade(offense: dict, pitching: dict,
         "rotation_grade": pitching.get("rotation_grade"),
         "bullpen_grade":  pitching.get("bullpen_grade"),
         "projected_wins": projected_wins,
-        "floor":          projected_wins - 3,
-        "ceiling":        projected_wins + 4,
+        "floor":          projected_wins if season_done else projected_wins - 3,
+        "ceiling":        projected_wins if season_done else projected_wins + 4,
         "buyer_seller":   deadline,
     }
 
@@ -794,8 +824,11 @@ def print_analysis(analysis: dict):
     print(f"  Offense:        {o['offense_grade']}")
     print(f"  Rotation:       {o['rotation_grade']}")
     print(f"  Bullpen:        {o['bullpen_grade']}")
-    print(f"  Projected wins: {o['projected_wins']}")
-    print(f"  Range:          {o['floor']}—{o['ceiling']} wins")
+    if o['floor'] == o['ceiling']:
+        print(f"  Final wins:     {o['projected_wins']}")
+    else:
+        print(f"  Projected wins: {o['projected_wins']}")
+        print(f"  Range:          {o['floor']}—{o['ceiling']} wins")
     if not final:
         print(f"  Deadline:       {o['buyer_seller']}")
 

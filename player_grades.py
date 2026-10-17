@@ -535,6 +535,8 @@ def grade_players(data: dict) -> dict:
 
             # core stats from the old source
             pa  = pd.to_numeric(row.get("PA",  0), errors="coerce") or 0
+            if pa == 0:
+                continue   # pitchers (e.g. relievers) with no plate appearances
             ops = pd.to_numeric(row.get("OPS", None), errors="coerce")
             ba  = pd.to_numeric(row.get("BA",  None), errors="coerce")
             obp = pd.to_numeric(row.get("OBP", None), errors="coerce")

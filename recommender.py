@@ -982,7 +982,10 @@ def print_recommendations(recs):
     print(f"  Luck:           {d['luck']}  Pythag: {d['pythag']}")
     print(f"  1-run / vLHP:   {d['one_run']} / {d['vlhp']}")
     print(f"  Last 10/30:     {d['last10']} / {d['last30']}")
-    print(f"  Proj wins:      {d['projected_wins']}  ({d['floor']}—{d['ceiling']})")
+    if d['floor'] == d['ceiling']:
+        print(f"  Final wins:     {d['projected_wins']}")
+    else:
+        print(f"  Proj wins:      {d['projected_wins']}  ({d['floor']}—{d['ceiling']})")
     if not final:
         print(f"  Deadline:       {d['buyer_seller']}")
         print(f"  Games left:     {d['games_remaining']}  easy {d['easy_games']}  hard {d['hard_games']}")
@@ -1064,8 +1067,11 @@ def print_recommendations(recs):
 
     print(f"\n── SEASON OUTLOOK ──")
     print(f"  Record now:   {ou['current_record']}")
-    print(f"  Most likely:  {ou['most_likely']}")
-    print(f"  Floor/Ceiling:{ou['floor']}—{ou['ceiling']} wins")
+    if final:
+        print(f"  Final wins:   {ou['projected_wins']}")
+    else:
+        print(f"  Most likely:  {ou['most_likely']}")
+        print(f"  Floor/Ceiling:{ou['floor']}—{ou['ceiling']} wins")
     if not final:
         print(f"  Playoff path: {ou['playoff_path']}")
     print(f"\n{'='*65}\n")
