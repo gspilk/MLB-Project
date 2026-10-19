@@ -25,6 +25,7 @@ A Python pipeline that pulls live 2026 MLB data — batting, pitching, standings
 - **Payroll tracking** (`payroll.py`) — team and league-wide payroll comparisons from your payroll CSVs
 - **Platoon lineup optimizer** (`platoon_lineup_optimizer.py`) — vs-LHP/vs-RHP lineup construction from real split data
 - **Starting-pitcher and ABS studies** — pitch counts, velocity, pitch mix, whiffs, release point and ABS challenges; see [Starting-pitcher studies](#starting-pitcher-studies-2025-vs-2026-and-abs)
+- **MySQL database and SQL queries** (`load_mysql.py`, `sql/`) — loads the cached games, pitches, plate appearances and player stats into MySQL and answers questions with SQL, including whether offense or pitching explains the 2025-to-2026 drop; see [MySQL database](#mysql-database-and-sql-queries)
 
 ## What makes it different
 
@@ -143,13 +144,59 @@ a modest number of swings. Treat each result as a lead to check with more data.
 
 `data/` is git-ignored: the scripts rebuild their cache, and Savant CSVs are downloaded by hand.
 
+## MySQL database and SQL queries
+
+The cached data can be loaded into a local MySQL database, so questions about the team can be answered
+with SQL instead of pandas code.
+
+```
+pip install sqlalchemy pymysql
+python load_mysql.py          # asks for your MySQL password; creates the mlb_project database
+```
+
+The loader reads the files the other scripts already cache (`data/exports`, `data/cache`, the Statcast CSVs)
+and the season schedule, creates the tables from `sql/schema.sql`, and fills them. Re-running it replaces a
+season's rows instead of duplicating them. Connection settings come from the environment
+(`MLB_DB_HOST`, `MLB_DB_PORT`, `MLB_DB_USER`, `MLB_DB_PASSWORD`, `MLB_DB_NAME`); the password is never stored in the
+repo. Tested on MySQL 8 and MariaDB.
+
+| Table | Contents |
+|---|---|
+| `games` | Every regular-season game: date, teams, runs, innings, whether it was played |
+| `plate_appearances` | Every plate appearance against Mariners pitchers: pitcher, batter, times through the order, result |
+| `pitches` | Pitch-by-pitch: type, speed, spin, movement, release point, location, call |
+| `batting_players`, `pitching_players` | League-wide season stats by player |
+| `statcast_players` | xwOBA, Barrel%, hard-hit and whiff rates by player |
+
+`sql/queries.sql` holds the analysis queries: runs scored and allowed by month against the league, starter
+workload and fastball velocity, OPS against by time through the order, whiff rate by pitch type, hitters'
+expected stats, and the Mariners' league ranks.
+
+### What the first query found
+
+Does the offense or the pitching explain the 2025-to-2026 drop? Measured per game against the rest of the league:
+
+| | Offense vs. league | Pitching and defense vs. league |
+|---|---|---|
+| 2025 | +0.29 runs | +0.17 runs |
+| 2026 | -0.39 runs | +0.03 runs |
+| Change | **-0.68** | -0.14 |
+
+- **The offense explains about 83% of the drop.** It went from above the league average to clearly below it and
+  was below the league in five of seven months of 2026; pitching and defense stayed near average.
+- **The one big pitching problem was a single month.** Runs allowed jumped to 6.26 per game in August 2026
+  (1.97 runs per game worse than the league), while pitching beat the league in every month before it.
+- **Caveats.** The first and last months hold few games, "pitching" here means runs allowed and so includes
+  defense, and this is one season compared with another, a pattern rather than proof.
+
 ## Future opportunities
 
 - Fold minor-league shortlist candidates into the free-agent recommendation scoring, so "sign a free agent," "promote a prospect," and "play the bench guy we already have" are one ranked list instead of three separate tools
 - Compare against previous seasons (multi-year player and team trend analysis; the starting-pitcher studies already do this for pitching)
 - Backtest the rest-of-season projection system against the actual final outcome once the season ends
 - Extend payroll data (`payroll.py`) into genuine value-per-dollar analysis
-- Check whether the offense or the pitching explains the 2025-to-2026 change in results (runs scored and allowed, record vs. expected record)
+- Model in R: aging curves for the positions of need, replacement level by position, and a back-test of the free-agent fit model against past offseasons
+- Load 2025 player and Statcast tables into MySQL for multi-season SQL queries
 - Decide the fate of the trade-deadline-specific code (see note above) before next season's stretch run
 
 ## Data sources
