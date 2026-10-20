@@ -28,6 +28,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from age_risk import add_age_risk
+
 DEFAULT_DIR = os.environ.get(
     "MLB_EXPORT_DIR",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "exports"))
@@ -65,7 +67,16 @@ def load_scored(folder: str):
         pcols = [c for c in proj.columns if c.startswith("proj_OPS_")]
         if pcols:
             df = df.merge(proj[["name"] + pcols].drop_duplicates("name"), on="name", how="left")
+    # age risk, from the R aging curves (data/exports/aging_by_age_band.csv); a no-op if that file is missing
+    df = add_age_risk(df, os.path.join(folder, "aging_by_age_band.csv"))
     return df
+
+
+def external_only(df: pd.DataFrame) -> pd.DataFrame:
+    """Drops the Mariners' own roster players (source 'Internal (roster)'), leaving real outside targets."""
+    if "source" not in df.columns:
+        return df
+    return df[~df["source"].astype(str).str.contains("Internal", na=False)]
 
 
 def priced(df: pd.DataFrame) -> pd.Series:
@@ -246,7 +257,15 @@ elif screen == "3. What to do":
     if "bats" in fa.columns:
         bats = c4.multiselect("Bats", ["L", "R", "S"], default=["L", "R", "S"])
 
-    v = fa.copy()
+    show_internal = st.toggle("Also show current Mariners (internal options)", value=False,
+                              help="Bench and depth players already on the roster, scored the same way, "
+                                   "for the 'sign someone or play the guy we have' question.")
+    v = fa.copy() if show_internal else external_only(fa)
+    if not show_internal and len(v) < len(fa):
+        st.caption(f"Hiding {len(fa) - len(v)} current Mariners. Showing outside free agents only.")
+    if v.empty:
+        st.info("No outside free agents in the scored file yet. Free agency opens after the World Series: "
+                "then run python mlb_free_agents.py and rerun the report.")
     if pos:
         v = v[v["position_group"].isin(pos)]
     p = priced(v)
@@ -260,9 +279,14 @@ elif screen == "3. What to do":
     v = v.sort_values("recommendation_score", ascending=False)
     st.caption(f"{len(v)} players match.")
 
-    show = [c for c in ["name", "position_group", "age_2027", "Team", "bats", "recommendation_score",
+    show = [c for c in ["name", "position_group", "age_2027", "age_risk", "age_war600_per_yr", "Team", "bats",
+                        "recommendation_score",
                         "Est_Cost_M", "OPS", "proj_OPS_2027", "Rtot", "option_detail"] if c in v.columns]
     st.dataframe(v[show].head(50), width="stretch", hide_index=True)
+    if "age_risk" in v.columns:
+        st.caption("Age risk = how much hitters of that age and position group usually decline in a season "
+                   "(WAR per 600 PA, from the R aging curves). It is an average, not a forecast for one player; "
+                   "'Too few to say' means not enough players at that age. Hitters only.")
 
     pv = v[priced(v)]
     if not pv.empty:
@@ -370,8 +394,8 @@ elif screen == "4. The plan":
 
     st.write("Build a signing slate. The totals use last year's salary as a rough stand-in; "
              "players with no price match are counted separately, not as $0.")
-    fa_all = fa
-    fa = fa.sort_values("recommendation_score", ascending=False).reset_index(drop=True)
+    fa_all = fa                      # keeps the Mariners' own rows for the depth chart
+    fa = external_only(fa).sort_values("recommendation_score", ascending=False).reset_index(drop=True)
     fa["label"] = fa["name"] + " (" + fa.get("position_group", pd.Series("", index=fa.index)).fillna("").astype(str) + ")"
     fa = fa.drop_duplicates("label")   # the same player listed twice at one position counts once
 
@@ -412,7 +436,7 @@ elif screen == "4. The plan":
             for g, n in counts[counts > 1].items():
                 st.warning(f"{n} players chosen at {g} -- they compete for the same job.")
         show = [c for c in ["name", "position_group", "recommendation_score", "Est_Cost_M", "bats",
-                            "proj_OPS_2027"] if c in sel.columns]
+                            "proj_OPS_2027", "age_risk"] if c in sel.columns]
         st.dataframe(sel[show], width="stretch", hide_index=True)
 
         needs = read_export(folder, "diagnosed_needs.csv")
