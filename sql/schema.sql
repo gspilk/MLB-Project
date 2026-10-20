@@ -120,3 +120,20 @@ CREATE TABLE IF NOT EXISTS statcast_players (
     whiff_percent      DOUBLE NULL, swing_percent DOUBLE NULL,
     PRIMARY KEY (season, player_type, player_id)
 );
+
+-- One row per player per season (players traded mid-season have a row per team in
+-- batting_players; this combines them). OPS is weighted by plate appearances.
+CREATE OR REPLACE VIEW batting_seasons AS
+SELECT
+    season,
+    player_id,
+    MAX(name)                                                    AS name,
+    MAX(age)                                                     AS age,
+    SUBSTRING_INDEX(GROUP_CONCAT(pos ORDER BY pa DESC), ',', 1)  AS pos,
+    SUM(pa)                                                      AS pa,
+    SUM(hr)                                                      AS hr,
+    ROUND(SUM(CASE WHEN ops IS NOT NULL THEN ops * pa END)
+        / NULLIF(SUM(CASE WHEN ops IS NOT NULL THEN pa END), 0), 3) AS ops,
+    ROUND(SUM(war), 1)                                           AS war
+FROM batting_players
+GROUP BY season, player_id;

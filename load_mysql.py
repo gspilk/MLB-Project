@@ -3,6 +3,8 @@ Load the project's existing data (CSV / parquet / cached API results) into MySQL
 
     python load_mysql.py                 # loads 2025 and 2026
     python load_mysql.py 2026            # one season
+    python load_mysql.py --players-only 2022 2023 2024 2025   # past seasons' player stats only
+                                                              # (build them first: python build_history.py)
 
 Connection settings come from environment variables so no password is ever
 stored in the repo:
@@ -185,12 +187,15 @@ LOADERS = [load_games, load_plate_appearances, load_pitches,
            load_batting_players, load_pitching_players, load_statcast]
 
 
-def main(seasons):
+PLAYER_LOADERS = [load_batting_players, load_pitching_players]
+
+
+def main(seasons, players_only=False):
     engine = get_engine()
     run_schema(engine)
     for season in seasons:
         print(f"\nSeason {season}")
-        for fn in LOADERS:
+        for fn in (PLAYER_LOADERS if players_only else LOADERS):
             try:
                 fn(engine, season)
             except Exception as e:
@@ -199,5 +204,7 @@ def main(seasons):
 
 
 if __name__ == "__main__":
-    seasons = [int(a) for a in sys.argv[1:]] or SEASONS
-    main(seasons)
+    args = sys.argv[1:]
+    players_only = "--players-only" in args
+    seasons = [int(a) for a in args if a.isdigit()] or SEASONS
+    main(seasons, players_only)
