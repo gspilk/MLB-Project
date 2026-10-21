@@ -1,6 +1,6 @@
 # Seattle Mariners Stretch-Run Analyzer
 
-A Python pipeline that pulls live 2026 MLB data — batting, pitching, standings, Statcast, and minor-league affiliate stats — from MLB's official sources and turns it into player grades, roster decisions, rest-of-season projections, and free-agent/prospect recommendations, all validated against real professional benchmarks.
+A Python pipeline that pulls live 2026 MLB data — batting, pitching, standings, Statcast, and minor-league affiliate stats — from MLB's official sources and turns it into player grades, roster decisions, rest-of-season projections, and free-agent/prospect recommendations, all validated against real professional benchmarks. The data also goes into a MySQL database, and R is used for the multi-season analysis (aging curves, offense vs. pitching).
 
 ## Project description
 
@@ -18,7 +18,7 @@ A Python pipeline that pulls live 2026 MLB data — batting, pitching, standings
 - Runs a standalone Monte Carlo simulation (thousands of simulated seasons + postseason brackets) for a higher-resolution playoff-odds estimate
 
 **Additional tools** (run separately from the core pipeline):
-- **Offseason report and weakness targets** (`offseason_report.py`, `weakness_targets.py`, `story_app.py`) — ranks the team's weakest positions and stats against the league, scores candidates by fit (position, handedness, need), and presents it as a Streamlit app
+- **Offseason report and weakness targets** (`offseason_report.py`, `weakness_targets.py`, `story_app.py`) — ranks the team's weakest positions and stats against the league, scores candidates by fit (position, handedness, need), and presents it as a Streamlit app, with an age-risk column for each hitter taken from the R aging curves
 - **Free-agent recommendations** (`free_agent.py`, `free_agent_stats_matcher.py`, `free_agent_recs.py`, `mlb_free_agents.py`) — loads the free-agent class (your list, or MLB's own free-agent list), matches players to league-wide stats, and scores every free agent *and* internal roster candidate against the Mariners' actual incumbent at each position, weighted by need and reliability (sample-size shrinkage)
 - **Minor-league prospect tracking** (`minor_league_stats.py`, `minor_league_shortlist.py`) — pulls the full organizational batting/pitching stats (MLB Stats API) and your top-prospect rankings CSV, filtered down to real, near-MLB-ready talent (AA/AAA, meaningful sample size, excluding anyone already on the active roster)
 - **Injury cost tracking** (`injury_cost_track.py`) — role-aware estimate of real wins lost to injury, weighted by leverage for relievers and games-missed for everyday players
@@ -26,6 +26,7 @@ A Python pipeline that pulls live 2026 MLB data — batting, pitching, standings
 - **Platoon lineup optimizer** (`platoon_lineup_optimizer.py`) — vs-LHP/vs-RHP lineup construction from real split data
 - **Starting-pitcher and ABS studies** — pitch counts, velocity, pitch mix, whiffs, release point and ABS challenges; see [Starting-pitcher studies](#starting-pitcher-studies-2025-vs-2026-and-abs)
 - **MySQL database and SQL queries** (`load_mysql.py`, `sql/`) — loads the cached games, pitches, plate appearances and player stats into MySQL and answers questions with SQL, including whether offense or pitching explains the 2025-to-2026 drop; see [MySQL database](#mysql-database-and-sql-queries)
+- **R analysis** (`r/offense_vs_pitching.R`, `r/aging_curves.R`) — reads the MySQL database and draws charts: where the 2025-to-2026 drop came from, and how much hitters at 1B, 3B and SS decline with age. The aging results feed the app's age-risk column; see [R analysis](#r-analysis-aging-curves-and-offense-vs-pitching)
 
 ## What makes it different
 
@@ -154,6 +155,13 @@ pip install sqlalchemy pymysql
 python load_mysql.py          # asks for your MySQL password; creates the mlb_project database
 ```
 
+For the multi-season analysis, build and load the earlier seasons' player tables too:
+
+```
+python build_history.py                                       # player tables for 2022-2025, cached as parquet
+python load_mysql.py --players-only 2022 2023 2024 2025 2026  # loads them into MySQL
+```
+
 The loader reads the files the other scripts already cache (`data/exports`, `data/cache`, the Statcast CSVs)
 and the season schedule, creates the tables from `sql/schema.sql`, and fills them. Re-running it replaces a
 season's rows instead of duplicating them. Connection settings come from the environment
@@ -165,7 +173,8 @@ repo. Tested on MySQL 8 and MariaDB.
 | `games` | Every regular-season game: date, teams, runs, innings, whether it was played |
 | `plate_appearances` | Every plate appearance against Mariners pitchers: pitcher, batter, times through the order, result |
 | `pitches` | Pitch-by-pitch: type, speed, spin, movement, release point, location, call |
-| `batting_players`, `pitching_players` | League-wide season stats by player |
+| `batting_players`, `pitching_players` | League-wide season stats by player, 2022 to 2026 |
+| `batting_seasons` (view) | One row per hitter per season: age, position, PA, HR, OPS, WAR |
 | `statcast_players` | xwOBA, Barrel%, hard-hit and whiff rates by player |
 
 `sql/queries.sql` holds the analysis queries: runs scored and allowed by month against the league, starter
@@ -179,8 +188,8 @@ Does the offense or the pitching explain the 2025-to-2026 drop? Measured per gam
 | | Offense vs. league | Pitching and defense vs. league |
 |---|---|---|
 | 2025 | +0.29 runs | +0.17 runs |
-| 2026 | -0.39 runs | +0.03 runs |
-| Change | **-0.68** | -0.14 |
+| 2026 | -0.40 runs | +0.03 runs |
+| Change | **-0.69** | -0.14 |
 
 - **The offense explains about 83% of the drop.** It went from above the league average to clearly below it and
   was below the league in five of seven months of 2026; pitching and defense stayed near average.
@@ -189,14 +198,55 @@ Does the offense or the pitching explain the 2025-to-2026 drop? Measured per gam
 - **Caveats.** The first and last months hold few games, "pitching" here means runs allowed and so includes
   defense, and this is one season compared with another, a pattern rather than proof.
 
+## R analysis: aging curves and offense vs pitching
+
+Two R scripts read the MySQL database (DBI and RMariaDB), do the calculation in R and draw the chart with ggplot2.
+The MySQL password is asked for when the script runs and is never stored in the repo.
+
+```r
+# in RStudio, from the project folder
+setwd("C:/path/to/MLB-Project")
+source("r/offense_vs_pitching.R")   # Mariners vs the league by month, 2025 vs 2026
+source("r/aging_curves.R")          # how hitters change from one season to the next, by age
+```
+
+Packages: `install.packages(c("DBI", "RMariaDB", "dplyr", "ggplot2", "rstudioapi"))`.
+
+![Offense vs pitching, 2025 vs 2026](r/figures/offense_vs_pitching_2025_2026.png)
+
+The same finding as the SQL query above, drawn month by month: the offense moved much more than the pitching.
+
+### Aging curves for 1B, 3B and SS
+
+How much does a hitter change from one season to the next, by age? The script takes every hitter with 300+ plate
+appearances in two consecutive seasons (802 player-season pairs, 2022 to 2026), measures the change in OPS and in WAR
+per 600 plate appearances, and averages it by the age at the start of the pair. Players with more plate appearances
+count more. The Mariners' positions of need (1B, 3B, SS) are compared with all other hitters.
+
+![How hitters change from one season to the next, by age](r/figures/aging_curves_infield.png)
+
+- **Hitters decline steadily from the late 20s.** At ages 27 to 32 a hitter typically loses about half a win per 600
+  plate appearances each season (1B/3B/SS: -0.53 at 27-29 and -0.45 at 30-32; other hitters: -0.36 and -0.48).
+- **Infielders may age a little harder, but the data cannot show it yet.** At 33-35 they lost 1.04 WAR per 600 PA against
+  0.63 for other hitters (25 and 41 players), but the error bars overlap. With five seasons of data this is a hint,
+  not a finding.
+- **Ages 36 and up are too thin to use** (8 infielders, 5 other hitters); the chart fades any band under 20 pairs.
+- **Caveat.** Players who decline sharply lose playing time and drop out of the sample, so the real decline is probably
+  steeper than shown. WAR is this project's own calculation.
+
+The script also saves `data/exports/aging_by_age_band.csv`. `age_risk.py` reads it and adds an **age risk** column to
+the free-agent screens of the app: the typical decline for a hitter of that age and position group, labelled Low,
+Moderate or High (or "Too few to say" for thin bands). It is an average for players like him, not a forecast for one
+player, and it covers hitters only.
+
 ## Future opportunities
 
 - Fold minor-league shortlist candidates into the free-agent recommendation scoring, so "sign a free agent," "promote a prospect," and "play the bench guy we already have" are one ranked list instead of three separate tools
 - Compare against previous seasons (multi-year player and team trend analysis; the starting-pitcher studies already do this for pitching)
 - Backtest the rest-of-season projection system against the actual final outcome once the season ends
 - Extend payroll data (`payroll.py`) into genuine value-per-dollar analysis
-- Model in R: aging curves for the positions of need, replacement level by position, and a back-test of the free-agent fit model against past offseasons
-- Load 2025 player and Statcast tables into MySQL for multi-season SQL queries
+- Model in R: replacement level by position, and a back-test of the free-agent fit model against past offseasons (aging curves are done, see above)
+- Load earlier seasons' Statcast tables into MySQL (player batting and pitching stats for 2022 to 2026 are already there)
 - Decide the fate of the trade-deadline-specific code (see note above) before next season's stretch run
 
 ## Data sources
@@ -222,3 +272,5 @@ WAR here is calculated by this project (`mlb_api.py`), not taken from another si
 
 - **Batters:** (batting runs from wOBA + baserunning runs + Statcast fielding runs + positional adjustment + replacement runs) ÷ runs per win
 - **Pitchers:** runs allowed per 9 vs. a league baseline adjusted for role (starter/reliever) and the team's defense, compared to a replacement-level pitcher; relievers are scaled by an estimated leverage
+
+**Fielding column names.** `Rtot` and `Rdrs` in the code are older column names. In this project both hold Statcast fielding runs (Outs Above Average, plus framing runs for catchers), not figures from another site.
