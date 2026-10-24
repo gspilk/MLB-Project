@@ -92,9 +92,14 @@ def _war_by_position(season, force_refresh=False):
     rank-per-row layout as the old source's team_output table.
     """
     tables = mlb_api.get_player_tables(season, force_refresh=force_refresh)
-    bat = tables["batting"]; bat = bat[~bat["_total"]]
-    fld = tables["fielding"]; fld = fld[~fld["_total"] & (fld["Pos"] != "P")]
-    pit = tables["pitching"]; pit = pit[~pit["_total"]]
+    # one row per player x team, with WAR / fielding runs split by playing time with each team
+    bat = mlb_api.split_by_team(tables["batting"], "hitting", season, ["WAR"], "PA",
+                                force_refresh=force_refresh)
+    fld = mlb_api.split_by_team(tables["fielding"], "fielding", season, ["Rfield"], "_inn_outs",
+                                keys=("player_id", "Pos"), force_refresh=force_refresh)
+    fld = fld[fld["Pos"] != "P"]
+    pit = mlb_api.split_by_team(tables["pitching"], "pitching", season, ["WAR"], "_outs",
+                                force_refresh=force_refresh)
     abbr = mlb_api.get_teams(season).set_index("team_id")["abbr"]
 
     totals = {}   # (team_id, pos) -> WAR

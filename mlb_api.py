@@ -729,7 +729,7 @@ def build_player_tables(season: int, force_refresh: bool = False) -> dict:
                   ("P" if people["primary_pos"].get(pid) == "P" else "DH")
                   for pid, tid, tot in zip(bat["player_id"], bat["team_id"], bat["_total"])]
 
-    team_def = fld[~fld["_total"]].groupby("team_id")["Rfield"].sum().to_dict()
+    team_def = _team_rfield(fld, season)
     pit = add_pitching_rates(pit, lc)
     pit = compute_pitching_war(pit, team_def, lc)
 
@@ -764,19 +764,145 @@ def shape(df: pd.DataFrame, cols: list) -> pd.DataFrame:
     return out[cols].reset_index(drop=True)
 
 
+def fetch_team_stats(season: int, group: str, force_refresh: bool = False,
+                     ttl_hours: float = DEFAULT_TTL_HOURS) -> pd.DataFrame:
+    """
+    Official team season totals (the API's teams_stats endpoint), one row per team,
+    indexed by team_id. Use these for team batting and pitching totals: adding up
+    player rows is wrong, because the player endpoint puts a traded player's whole
+    season under his LAST team, so a team that made trades gets other teams' stats.
+    Returns an empty frame if the call fails (team_totals then falls back to the old sum).
+    """
+    if group not in ("hitting", "pitching"):
+        return pd.DataFrame()
+    try:
+        resp = api_get("teams_stats", {"stats": "season", "group": group, "season": season,
+                                       "sportIds": 1, "gameType": "R"},
+                       ttl_hours=ttl_hours, force_refresh=force_refresh)
+    except Exception as e:
+        print(f"  [warn] official team totals unavailable ({e}); summing player rows instead")
+        return pd.DataFrame()
+    rows = []
+    for block in resp.get("stats", []):
+        for s in block.get("splits", []):
+            st = s.get("stat", {})
+            row = {"team_id": (s.get("team") or {}).get("id")}
+            for api_key, col in GROUP_MAP[group].items():
+                row[col] = _num(st.get(api_key))
+            if group == "pitching" and np.isnan(row["_outs"]):
+                row["_outs"] = ip_to_outs(st.get("inningsPitched"))
+            rows.append(row)
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    df = df.dropna(subset=["team_id"])
+    df["team_id"] = df["team_id"].astype(int)
+    return df.set_index("team_id")
+
+
+def fetch_team_splits(season: int, group: str, force_refresh: bool = False) -> pd.DataFrame:
+    """
+    What each player did WITH each team: one row per player x team (fielding: x position),
+    from asking the stats endpoint team by team. 30 calls per group, cached for a day.
+    Returns an empty frame if any team's call fails (so a partial table is never used).
+    """
+    frames = []
+    for tid in get_teams(season)["team_id"]:
+        try:
+            df = fetch_player_stats(season, group, team_id=int(tid), force_refresh=force_refresh)
+        except Exception as e:
+            print(f"  [warn] per-team {group} stats failed for team {tid} ({e}); "
+                  f"team WAR / fielding will use whole-season player rows")
+            return pd.DataFrame()
+        if not df.empty:
+            frames.append(df)
+    if not frames:
+        return pd.DataFrame()
+    out = pd.concat(frames, ignore_index=True).dropna(subset=["team_id"])
+    out["team_id"] = out["team_id"].astype(int)
+    out["_total"] = False
+    return out
+
+
+def split_by_team(players: pd.DataFrame, group: str, season: int, value_cols: list,
+                  weight_col: str, keys=("player_id",), force_refresh: bool = False) -> pd.DataFrame:
+    """
+    One row per player x team showing what he did WITH that team (G, PA, innings ...),
+    with each value in value_cols (WAR, fielding runs) cut up in proportion to his playing
+    time (weight_col) with each team. The player tables hold a traded player's whole season
+    under his last team; this puts each part of it back on the right team.
+    Falls back to the whole-season rows if the per-team data is unavailable.
+    """
+    whole = players[~players["_total"]]
+    splits = fetch_team_splits(season, group, force_refresh=force_refresh)
+    if splits.empty:
+        return whole.copy()
+    keys = list(keys)
+    vals = whole.groupby(keys)[list(value_cols)].sum(min_count=1).reset_index()
+    out = splits.merge(vals, on=keys, how="left")
+    w = out[weight_col].fillna(0.0)
+    total_w = w.groupby([out[k] for k in keys]).transform("sum")
+    n = w.groupby([out[k] for k in keys]).transform("size")
+    share = np.where(total_w > 0, w / total_w.replace(0, np.nan), 1.0 / n)
+    for c in value_cols:
+        out[c] = out[c] * share
+    return out
+
+
+def _team_value_sums(players: pd.DataFrame, group: str, season: int):
+    """{'WAR': Series by team_id} (batting, pitching) or {'Rfield': ...} (fielding),
+    each player's value split across the teams he played for; None if unavailable."""
+    spec = {"hitting": (["WAR"], "PA", ("player_id",)),
+            "pitching": (["WAR"], "_outs", ("player_id",)),
+            "fielding": (["Rfield"], "_inn_outs", ("player_id", "Pos"))}[group]
+    cols, weight, keys = spec
+    cols = [c for c in cols if c in players.columns]
+    if not cols or weight not in players.columns:
+        return None
+    if fetch_team_splits(season, group).empty:
+        return None
+    s = split_by_team(players, group, season, cols, weight, keys=keys)
+    return {c: s.groupby("team_id")[c].sum() for c in cols}
+
+
+def _team_rfield(fld: pd.DataFrame, season: int) -> dict:
+    """Team defensive runs by team_id, with traded players' runs split across their teams."""
+    sums = _team_value_sums(fld, "fielding", season)
+    if sums is not None:
+        return sums["Rfield"].to_dict()
+    return fld[~fld["_total"]].groupby("team_id")["Rfield"].sum().to_dict()
+
+
 def team_totals(players: pd.DataFrame, group: str, season: int,
                 games_by_team: dict = None) -> pd.DataFrame:
-    """Team totals summed from per-team player rows; Tm = full team name."""
+    """
+    Team totals; Tm = full team name. Batting and pitching counting stats come from the
+    official team totals (fetch_team_stats). WAR and fielding runs are summed from player
+    rows after splitting each traded player's season across his teams (split_by_team), so a
+    team only gets credit for what a player did while he was with it.
+    """
     if players.empty:
         return pd.DataFrame()
     rows = players[~players["_total"]]
     counting = [c for c in GROUP_MAP[group].values()] + (["_inn_outs"] if group == "fielding" else [])
     counting = [c for c in counting if c in rows.columns]
     agg = rows.groupby("team_id")[counting].sum(min_count=1)
+    agg.index = agg.index.astype(int)
+    official = fetch_team_stats(season, group)
+    if not official.empty:
+        cols = [c for c in counting if c in official.columns]
+        agg.update(official[cols])
+    split = _team_value_sums(players, group, season)
+
+    def by_team(col):
+        if split is not None and col in split:
+            return split[col].reindex(agg.index)
+        return rows.groupby("team_id")[col].sum().rename(index=int).reindex(agg.index)
+
     if "WAR" in rows.columns:
-        agg["WAR"] = rows.groupby("team_id")["WAR"].sum().round(1)
+        agg["WAR"] = by_team("WAR").round(1)
     if "Rfield" in rows.columns:
-        agg["Rtot"] = rows.groupby("team_id")["Rfield"].sum().round(0)
+        agg["Rtot"] = by_team("Rfield").round(0)
         agg["Rdrs"] = agg["Rtot"]
     teams = get_teams(season).set_index("team_id")
     agg = agg.reset_index()
