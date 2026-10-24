@@ -239,12 +239,47 @@ the free-agent screens of the app: the typical decline for a hitter of that age 
 Moderate or High (or "Too few to say" for thin bands). It is an average for players like him, not a forecast for one
 player, and it covers hitters only.
 
+## Data checks: what was wrong and how it was fixed
+
+Checking the team tables against the game-level data in MySQL turned up several errors. They are fixed, and are written down here because they change how the numbers should be read.
+
+**Team totals were inflated by traded players.** The player-level API returns a traded player's whole-season totals under his *last* team. Summing player rows therefore gave the Mariners 6,657 plate appearances and 735 runs, against the official 6,089 and 664 (the games table in MySQL agreed with the official figures). Two fixes in `mlb_api.py`:
+
+- Team counting stats (runs, hits, walks, strikeouts and so on) now come from the API's official team totals (`fetch_team_stats`).
+- Team and position WAR and fielding runs are split across the teams a player played for, in proportion to his playing time with each (`split_by_team`): plate appearances for hitters, outs recorded for pitchers, innings at the position for fielders.
+
+**Fielding was judged on the wrong scale.** The diagnosis treated 5 runs as a typical team-to-team spread in fielding. The real spread is about 23 runs, so Seattle's -50 was being scored as an extreme outlier (severity 10.6) when it is roughly two spreads below average (severity 2.2). The threshold in `team_diagnosis.py` is now 23.
+
+**The diagnosis uses Seattle-only numbers.** `team_diagnosis.py` now reads the Mariners' batting, rotation, bullpen and fielding lines from the corrected team-level tables rather than from whole-season player rows.
+
+**Year-over-year fielding.** `year_over_year_decomposition.py` overwrote a player's value when he appeared at more than one position; it now adds them up. The fielding change reads about -19 to -53 runs, and the ledger in `offseason_report.py` uses the same diagnosed total.
+
+What the corrected data says about 2026:
+
+| Area | Result |
+|---|---|
+| Runs per game | 4.10, 28th of 30 |
+| Offense (batting WAR from hitters) | 11.7, 29th |
+| Weakest positions by WAR | 3B (-0.8, 30th), SS (-0.1, 29th), 1B (-0.2, 28th) |
+| Pitching | ERA 4.20 (19th), FIP 3.99, pitcher WAR 20.0 (8th) |
+| Team fielding | -50 runs, 30th |
+
+The earlier reading that pitching was the problem does not hold up: the offense was bad, and fielding fell sharply. How much of the fielding drop is real defence and how much is a changed roster is not settled, so that remains a hypothesis rather than a finding.
+
+**Known limits.**
+
+- Choosing the incumbent at each position still uses whole-season rows and plate appearances only, so a handful of picks are poor (for example a designated hitter with 27 plate appearances). The weakest-position list should be read with that in mind until the needs table is rebuilt on playing time with Seattle only.
+- Player-level Mariners tables are still whole-season rows for traded players.
+- The free-agent pool is small until after the World Series.
+- One Baseball Savant catcher-framing file produces a parsing warning, which has not been fixed.
+
 ## Future opportunities
 
 - Fold minor-league shortlist candidates into the free-agent recommendation scoring, so "sign a free agent," "promote a prospect," and "play the bench guy we already have" are one ranked list instead of three separate tools
 - Compare against previous seasons (multi-year player and team trend analysis; the starting-pitcher studies already do this for pitching)
 - Backtest the rest-of-season projection system against the actual final outcome once the season ends
 - Extend payroll data (`payroll.py`) into genuine value-per-dollar analysis
+- Rebuild the needs table by position on playing time with Seattle only, using position WAR against the league average and best
 - Model in R: replacement level by position, and a back-test of the free-agent fit model against past offseasons (aging curves are done, see above)
 - Load earlier seasons' Statcast tables into MySQL (player batting and pitching stats for 2022 to 2026 are already there)
 - Decide the fate of the trade-deadline-specific code (see note above) before next season's stretch run

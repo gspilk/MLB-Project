@@ -95,7 +95,10 @@ THRESHOLDS = {
     "bullpen_ERA": 0.30, "bullpen_WHIP": 0.06, "bullpen_K9": 0.5,
     "bullpen_BB9": 0.3, "bullpen_HR9": 0.15,
 
-    "fielding_Rtot": 5.0,
+    # Fielding is in RUNS and swings far more than the rate stats above: across the 30 teams in
+    # 2026 the standard deviation of team Rtot was about 23 runs. (This was 5.0, which made a
+    # -50 run team score 10 "thresholds" below average and drowned every other weakness.)
+    "fielding_Rtot": 23.0,
 }
 
 # Stats where LOWER is better need the gap sign flipped before ranking
@@ -217,6 +220,51 @@ def _team_fielding(fielding: pd.DataFrame) -> dict:
     return {"Rtot": total}
 
 
+def _seattle_team_lines(season: int = 2026):
+    """
+    Seattle's team batting line, rotation line, bullpen line and fielding runs from what the
+    players did WITH Seattle: official team totals, pitchers' Seattle-only rows, and fielding
+    runs split across a traded player's teams. The player tables hold a traded player's WHOLE
+    season under his last team, so the old way (averaging Seattle's player rows) counted a
+    player's games for other teams. Rates are built from sums, the same way
+    get_league_averages() builds the league's, so the two are comparable.
+    Returns None if anything is unavailable (the caller then uses the old player-row method).
+    """
+    try:
+        import mlb_api
+        tid = mlb_api.SEA_TEAM_ID
+        tb = mlb_api.fetch_team_stats(season, "hitting")
+        if tb.empty or tid not in tb.index:
+            return None
+        t = tb.loc[tid].fillna(0)
+        ab, pa = t["AB"], t["PA"]
+        ba = t["H"] / ab
+        obp = (t["H"] + t["BB"] + t["HBP"]) / (ab + t["BB"] + t["HBP"] + t["SF"])
+        slg = t["TB"] / ab
+        lines = {"batting": {"BA": ba, "OBP": obp, "SLG": slg, "OPS": obp + slg, "ISO": slg - ba,
+                             "BB_pct": t["BB"] / pa * 100, "K_pct": t["SO"] / pa * 100}}
+
+        pit = mlb_api.fetch_player_stats(season, "pitching", team_id=tid).fillna(0)
+        starter = pit["GS"] >= 0.5 * pit["G"].clip(lower=1)
+        for name, grp in (("rotation", pit[starter]), ("bullpen", pit[~starter])):
+            ip = grp["_outs"].sum() / 3
+            if ip > 0:
+                lines[name] = {"ERA": 9 * grp["ER"].sum() / ip,
+                               "WHIP": (grp["H"].sum() + grp["BB"].sum()) / ip,
+                               "K9": 9 * grp["SO"].sum() / ip, "BB9": 9 * grp["BB"].sum() / ip,
+                               "HR9": 9 * grp["HR"].sum() / ip}
+
+        tables = mlb_api.get_player_tables(season)
+        tt = mlb_api.team_totals(tables["fielding"], "fielding", season)
+        row = tt[tt["team_id"] == tid]
+        if not row.empty and "Rtot" in row.columns:
+            lines["fielding"] = {"Rtot": float(row["Rtot"].iloc[0])}
+        return lines
+    except Exception as e:
+        print(f"  [warn] Seattle-only team lines unavailable ({e}) -- using player rows instead")
+        return None
+
+
 def get_war_distribution(force_refresh: bool = False, stats: dict = None) -> dict:
     """CONTEXT only -- not a weakness/strength verdict. Tells you whether
     production is concentrated in a few players (fragile -- one injury
@@ -249,10 +297,13 @@ def diagnose_team(force_refresh: bool = False) -> pd.DataFrame:
     pitching = stats.get("pitching", pd.DataFrame())
     fielding = stats.get("fielding", pd.DataFrame())
     league = get_league_averages()
+    lines = _seattle_team_lines()
+    if lines:
+        print("  [ok] team lines from Seattle-only totals (traded players' earlier games excluded)")
 
     rows = []
 
-    team_bat = _weighted_batting(batting)
+    team_bat = lines["batting"] if lines else _weighted_batting(batting)
     for stat in ["BA", "OBP", "SLG", "OPS", "ISO", "BB_pct", "K_pct"]:
         if stat not in team_bat or stat not in league:
             continue
@@ -261,7 +312,7 @@ def diagnose_team(force_refresh: bool = False) -> pd.DataFrame:
         rows.append(_build_row("Batting", stat, team_val, lg_val, gap, stat in LOWER_IS_BETTER))
 
     rot = get_rotation(pitching)
-    team_rot = _weighted_pitching(rot)
+    team_rot = lines.get("rotation") if lines and lines.get("rotation") else _weighted_pitching(rot)
     for stat, key in [("ERA", "rotation_ERA"), ("WHIP", "rotation_WHIP"),
                        ("K9", "rotation_K9"), ("BB9", "rotation_BB9"),
                        ("HR9", "rotation_HR9")]:
@@ -272,7 +323,7 @@ def diagnose_team(force_refresh: bool = False) -> pd.DataFrame:
         rows.append(_build_row("Rotation", key, team_val, lg_val, gap, key in LOWER_IS_BETTER))
 
     bp = get_bullpen(pitching)
-    team_bp = _weighted_pitching(bp)
+    team_bp = lines.get("bullpen") if lines and lines.get("bullpen") else _weighted_pitching(bp)
     for stat, key in [("ERA", "bullpen_ERA"), ("WHIP", "bullpen_WHIP"),
                        ("K9", "bullpen_K9"), ("BB9", "bullpen_BB9"),
                        ("HR9", "bullpen_HR9")]:
@@ -282,7 +333,7 @@ def diagnose_team(force_refresh: bool = False) -> pd.DataFrame:
         gap = round(team_val - lg_val, 3)
         rows.append(_build_row("Bullpen", key, team_val, lg_val, gap, key in LOWER_IS_BETTER))
 
-    team_field = _team_fielding(fielding)
+    team_field = lines.get("fielding") if lines and lines.get("fielding") else _team_fielding(fielding)
     if "Rtot" in team_field and "fielding_Rtot" in league:
         team_val, lg_val = team_field["Rtot"], league["fielding_Rtot"]
         gap = round(team_val - lg_val, 3)
