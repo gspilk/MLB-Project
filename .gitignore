@@ -9,6 +9,10 @@ _old/
 data/*
 cache/
 output/
+.RData
+.Rhistory
+*.bak
+*.bak2
 
 # Generated reports and exports
 output/*.xlsx
