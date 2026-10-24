@@ -204,9 +204,15 @@ def run_report(from_season: int = 2025, to_season: int = 2026):
               "asked directly")
     # ────────────────────────────────────────────────────────────────────
     real_team_total = None
-    fielding_df = data["seattle"].get("fielding", pd.DataFrame())
-    if not fielding_df.empty:
-        real_team_total = _team_fielding(fielding_df).get("Rtot")
+    # use the diagnosis' Seattle-only team total (traded players' earlier games excluded);
+    # fall back to summing the player rows only if the diagnosis has no fielding row
+    fld_row = needs[needs["Metric"] == "fielding_Rtot"] if "Metric" in needs.columns else needs.iloc[0:0]
+    if not fld_row.empty:
+        real_team_total = float(fld_row["Team_Value"].iloc[0])
+    else:
+        fielding_df = data["seattle"].get("fielding", pd.DataFrame())
+        if not fielding_df.empty:
+            real_team_total = _team_fielding(fielding_df).get("Rtot")
 
     print_full_team_fielding_ledger(data, real_team_total=real_team_total)
 

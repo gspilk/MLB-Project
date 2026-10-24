@@ -250,7 +250,12 @@ def decompose_sum_stat(df_a: pd.DataFrame, df_b: pd.DataFrame,
             key = _normalize_name(row["Name"])
             if not key:
                 continue
-            out[key] = {"name": row["Name"], "value": float(row[stat_col])}
+            # a player can have several rows (fielding: one per position), so ADD them up;
+            # keeping only the last row dropped most of the team total
+            if key in out:
+                out[key]["value"] += float(row[stat_col])
+            else:
+                out[key] = {"name": row["Name"], "value": float(row[stat_col])}
         return out
 
     table_a = _table(df_a)
