@@ -149,6 +149,20 @@ def run_report(from_season: int = 2025, to_season: int = 2026):
     _section("3. FREE AGENT RECOMMENDATIONS -- WHO fixes it (fit + real cost/value)")
     # ────────────────────────────────────────────────────────────────────
     incumbents = build_mariners_incumbents(data)
+    # Replace the whole-season hitter picks with Seattle-only starters (position_needs.py);
+    # on any failure keep the old picks.
+    pos_needs = None
+    try:
+        import position_needs
+        pos_needs, _ = position_needs.run(to_season, quiet=True)
+        for g in [k for k, v in incumbents.items() if "OPS" in v]:
+            incumbents.pop(g)
+        incumbents.update(position_needs.seattle_incumbents(pos_needs))
+        print("  [ok] hitter starters from Mariners-only playing time (position_needs.py)")
+    except Exception as e:
+        pos_needs = None
+        print(f"  [warn] position_needs.py unavailable ({type(e).__name__}: {e}); "
+              f"using whole-season incumbents")
     for group, info in incumbents.items():
         stat = info.get("OPS", info.get("ERA"))
         print(f"  {group}: {info['name']} ({stat})")
@@ -182,10 +196,17 @@ def run_report(from_season: int = 2025, to_season: int = 2026):
     print(f"\nReal comparison page saved: {html_path}")
 
     batter_incumbents = {g: info for g, info in incumbents.items() if "OPS" in info}
-    weakest = sorted(batter_incumbents.items(), key=lambda kv: kv[1]["OPS"])[:3]
-    print("\nReal weakest positions by incumbent performance:")
+    gap = {}
+    if pos_needs is not None:
+        gap = pos_needs.set_index("position_group")["wins_below_avg"].to_dict()
+        weakest = sorted(batter_incumbents.items(), key=lambda kv: -gap.get(kv[0], -99))[:3]
+        print("\nWeakest hitting positions (Mariners WAR vs league average at the position):")
+    else:
+        weakest = sorted(batter_incumbents.items(), key=lambda kv: kv[1]["OPS"])[:3]
+        print("\nReal weakest positions by incumbent performance:")
     for group, info in weakest:
-        print(f"  {group}: {info['name']} ({info['OPS']:.3f} OPS)")
+        extra = f", {gap[group]:+.1f} wins below average" if group in gap else ""
+        print(f"  {group}: {info['name']} ({info['OPS']:.3f} OPS{extra})")
 
     print("\nSaving real chart files for the actual weakest positions...")
     for group, _ in weakest:

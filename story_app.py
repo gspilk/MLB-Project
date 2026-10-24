@@ -155,6 +155,21 @@ def build_depth(all_rows: pd.DataFrame, added: pd.DataFrame, starters: pd.DataFr
     return out
 
 
+def merge_position_starters(starters, pn):
+    """Replaces the hitters' 'Current starter' rows with the Mariners-only starters from
+    position_needs.csv (most plate appearances at the position while a Mariner). Pitching rows and
+    anything missing stay as they were."""
+    if pn is None or pn.empty or not {"position_group", "starter", "starter_ops_with_sea"} <= set(pn.columns):
+        return starters
+    new = pn[pn["starter_ops_with_sea"].notna() & (pn["starter"] != "no clear starter")]
+    new = pd.DataFrame({"position_group": new["position_group"], "player": new["starter"],
+                        "stat": new["starter_ops_with_sea"], "role": "Current starter"})
+    if starters is None or starters.empty:
+        return new
+    keep = starters[~((starters["role"] == "Current starter") & starters["position_group"].isin(new["position_group"]))]
+    return pd.concat([keep, new], ignore_index=True)
+
+
 def starter_now_and_after(pitch: bool, depth: pd.DataFrame):
     """Starter now = the incumbent row. With signings = the best stat among the
     incumbent and the added players (roster depth is shown but not promoted)."""
@@ -230,6 +245,33 @@ if screen == "1. The problem":
         st.dataframe(view, width="stretch", hide_index=True)
         st.download_button("Download this table (CSV)", view.to_csv(index=False).encode("utf-8"),
                            file_name="mariners_diagnosed_needs.csv", mime="text/csv")
+    pn = read_export(folder, "position_needs.csv")
+    if pn is not None and not pn.empty:
+        st.subheader("Where the wins are lost, by position")
+        st.caption("Mariners WAR at each position compared with the league average at that position, using only "
+                   "what players did while on the Mariners. Positive = wins below average. Run "
+                   "position_needs.py (or offseason_report.py) to refresh.")
+        import altair as alt
+        chart_df = pn[["position", "wins_below_avg"]].copy()
+        chart_df["side"] = np.where(chart_df["wins_below_avg"] > 0, "Below league average", "At or above average")
+        chart = (alt.Chart(chart_df).mark_bar()
+                 .encode(y=alt.Y("position:N", sort=alt.EncodingSortField("wins_below_avg", order="descending"), title=None),
+                         x=alt.X("wins_below_avg:Q", title="Wins below league average at the position (negative = better than average)"),
+                         color=alt.Color("side:N", legend=None,
+                                         scale=alt.Scale(domain=["Below league average", "At or above average"],
+                                                         range=["#c0392b", "#2e7d9a"])),
+                         tooltip=["position", "wins_below_avg"])
+                 .properties(height=300))
+        st.altair_chart(chart, width="stretch")
+        pcols = [c for c in ["position", "need", "sea_war", "league_avg_war", "sea_rank", "wins_below_avg",
+                             "starter", "starter_pa_with_sea", "starter_ops_with_sea", "depth"] if c in pn.columns]
+        st.dataframe(pn[pcols], width="stretch", hide_index=True,
+                     column_config={"sea_war": st.column_config.NumberColumn("Mariners WAR", format="%.1f"),
+                                    "league_avg_war": st.column_config.NumberColumn("League avg WAR", format="%.1f"),
+                                    "sea_rank": st.column_config.NumberColumn("Rank of 30", format="%d"),
+                                    "wins_below_avg": st.column_config.NumberColumn("Wins below avg", format="%.1f"),
+                                    "starter_pa_with_sea": st.column_config.NumberColumn("Starter PA", format="%d"),
+                                    "starter_ops_with_sea": st.column_config.NumberColumn("Starter OPS", format="%.3f")})
     st.info("Next: screen 2 shows who drove the change, screen 3 shows who could fix it.")
 
 
@@ -342,8 +384,9 @@ elif screen == "5. Who fixes it":
     if tg is None:
         st.warning("weakness_targets.csv not found. Run  python weakness_targets.py  first.")
         st.stop()
-    st.write("For each weak stat, the players who are clearly better at it than the Mariners are. "
-             "These are **candidates, not free agents**: any non-Mariners player appears, whatever his contract.")
+    st.write("The players who are clearly better than the Mariners at the stats the team is weakest in. "
+             "These are **candidates, not free agents**: any non-Mariners player appears, whatever his contract. "
+             "Once free agency opens, screens 3 and 4 narrow this to players who can actually be signed.")
     needs = read_export(folder, "diagnosed_needs.csv")
     summ = read_export(folder, "weakness_targets_summary.csv")
 
@@ -351,20 +394,29 @@ elif screen == "5. Who fixes it":
     if not metrics:
         st.info("No players beat the Mariners on the weak stats with enough playing time.")
         st.stop()
+    sev = {}
     if needs is not None:
         sev = needs.set_index("Metric")["Severity_Score"].to_dict()
         metrics.sort(key=lambda m: -sev.get(m, 0))
-    m = st.selectbox("Weak stat", metrics)
 
-    # optional filters, so you can say what you actually need (e.g. right-handed outfielders)
+    # the weak stats, worst first, so the filters below make sense
+    cols_m = st.columns(len(metrics))
+    for c, mm in zip(cols_m, metrics):
+        tv = float(tg.loc[tg["metric"] == mm, "mariners"].iloc[0])
+        c.metric(mm, f"{tv:g}")
+        if mm in sev:
+            c.caption(f"Severity {sev[mm]:.2f}")
+
+    # filters shared by both views
     OF_LABEL = "Outfield (LF/CF/RF)"
     pos_all = (sorted({str(p) for p in tg["position"].dropna() if str(p)}) if "position" in tg.columns else [])
-    f1, f2 = st.columns(2)
+    f1, f2, f3 = st.columns(3)
     pos_choice = f1.multiselect("Position", ([OF_LABEL] if any(p in ("LF", "CF", "RF") for p in pos_all) else []) + pos_all,
                                 help="Applies to hitters and fielders. Pitching stats have no position.") if pos_all else []
     has_bats = "bats" in tg.columns and tg["bats"].fillna("").astype(str).str.len().gt(0).any()
     bats_choice = f2.multiselect("Bats", ["L", "R", "S"],
                                  help="From player_handedness.csv (run mlb_stats_api.py to build it).") if has_bats else []
+    search = f3.text_input("Find a player", placeholder="part of a name")
 
     def apply_filters(d: pd.DataFrame) -> pd.DataFrame:
         if pos_choice and "position" in d.columns and d["position"].fillna("").astype(str).str.len().gt(0).any():
@@ -372,45 +424,74 @@ elif screen == "5. Who fixes it":
             d = d[d["position"].fillna("").astype(str).isin(allowed)]
         if bats_choice and "bats" in d.columns and d["bats"].fillna("").astype(str).str.len().gt(0).any():
             d = d[d["bats"].fillna("").astype(str).isin(bats_choice)]
+        if search.strip() and "name" in d.columns:
+            d = d[d["name"].astype(str).str.contains(search.strip(), case=False, na=False, regex=False)]
         return d
 
-    row_all = tg[tg["metric"] == m]
-    team_val = float(row_all["mariners"].iloc[0])
-    row = apply_filters(row_all)
-    st.metric(f"Mariners {m}", f"{team_val:g}")
-    is_fld = m == "fielding_Rtot"
-    show_pos = "position" in row.columns and row["position"].fillna("").astype(str).str.len().gt(0).any()
-    show_bats = "bats" in row.columns and row["bats"].fillna("").astype(str).str.len().gt(0).any()
-    # for fielding, value and better_by are the same number (runs above average), so show it once
-    cols = (["rank", "name", "Team"] + (["position"] if show_pos else []) + (["bats"] if show_bats else [])
-            + ["sample", "value"] + ([] if is_fld else ["better_by"]))
-    show = row[cols].head(25).rename(columns={"sample": "Innings" if is_fld else "PA or IP",
-                                              "value": "Runs above average" if is_fld else m,
-                                              "better_by": "Better than Mariners by"})
-    if is_fld:
-        st.caption("Fielding runs are already measured against an average fielder (0), so this is the best gloves "
-                   "in the league, not a comparison with the Mariners' team total.")
-    if (pos_choice or bats_choice) and len(row) < len(row_all):
-        st.caption(f"Filters on: {len(row)} of {len(row_all)} players match (players whose position or bat side "
-                   "is unknown are hidden).")
-    if row.empty:
-        st.info("No players match these filters for this stat.")
-    else:
-        st.dataframe(show, width="stretch", hide_index=True)
+    tab_fit, tab_stat = st.tabs(["Best overall fit", "By weak stat"])
 
-    if summ is not None and not summ.empty:
-        st.subheader("Fix several problems at once")
-        st.caption("Fit score = how far the player beats the Mariners on each weak stat (in league standard deviations), weighted by how severe that weakness is. Higher is better.")
-        pool_names = {"hit": "Hitters", "rel": "Relievers", "sp": "Starters"}
-        pools = [p for p in ["hit", "rel", "sp"] if p in set(summ["pool"])]
-        kind = st.radio("Show", [pool_names[p] for p in pools], horizontal=True)
-        inv = {v: k for k, v in pool_names.items()}
-        s2 = apply_filters(summ[summ["pool"] == inv[kind]]).head(15).rename(columns={
-            "weak_metrics_beaten": "Weak stats beaten", "severity_covered": "Severity covered", "fit_score": "Fit score"})
-        st.dataframe(s2[[c for c in ["name", "Team", "position", "bats", "Fit score", "Weak stats beaten",
-                                     "Severity covered", "metrics"] if c in s2.columns
-                         and (c not in ("position", "bats") or s2[c].fillna("").astype(str).str.len().gt(0).any())]],
-                     width="stretch", hide_index=True)
+    with tab_fit:
+        if summ is None or summ.empty:
+            st.info("weakness_targets_summary.csv is missing or empty. Run  python weakness_targets.py.")
+        else:
+            st.caption("Fit score = how far the player beats the Mariners on each weak stat (in league standard "
+                       "deviations), weighted by how severe that weakness is. Higher is better. "
+                       "The best candidates beat the Mariners on several weak stats at once.")
+            pool_names = {"hit": "Hitters", "rel": "Relievers", "sp": "Starters"}
+            pools = [p for p in ["hit", "rel", "sp"] if p in set(summ["pool"])]
+            kind = st.radio("Show", [pool_names[p] for p in pools], horizontal=True)
+            inv = {v: k for k, v in pool_names.items()}
+            n_show = st.slider("How many to show", 5, 50, 15)
+            s2 = apply_filters(summ[summ["pool"] == inv[kind]])
+            if s2.empty:
+                st.info("No players match these filters.")
+            else:
+                s2 = s2.head(n_show).rename(columns={
+                    "weak_metrics_beaten": "Weak stats beaten", "severity_covered": "Severity covered",
+                    "fit_score": "Fit score"})
+                keep = [c for c in ["name", "Team", "position", "bats", "Fit score", "Weak stats beaten",
+                                    "Severity covered", "metrics"] if c in s2.columns
+                        and (c not in ("position", "bats") or s2[c].fillna("").astype(str).str.len().gt(0).any())]
+                st.dataframe(s2[keep], width="stretch", hide_index=True,
+                             column_config={"Fit score": st.column_config.NumberColumn(format="%.2f"),
+                                            "Severity covered": st.column_config.NumberColumn(format="%.2f")})
+                st.download_button("Download this list (CSV)", s2[keep].to_csv(index=False).encode("utf-8"),
+                                   file_name="best_fit_candidates.csv", mime="text/csv")
+
+    with tab_stat:
+        m = st.selectbox("Weak stat", metrics)
+        row_all = tg[tg["metric"] == m]
+        team_val = float(row_all["mariners"].iloc[0])
+        row = apply_filters(row_all)
+        is_fld = m == "fielding_Rtot"
+        show_pos = "position" in row.columns and row["position"].fillna("").astype(str).str.len().gt(0).any()
+        show_bats = "bats" in row.columns and row["bats"].fillna("").astype(str).str.len().gt(0).any()
+        samp_label = "Innings" if is_fld else "PA or IP"
+        if "sample" in row.columns and row["sample"].notna().any():
+            hi = int(np.ceil(row["sample"].max()))
+            min_s = st.slider(f"Minimum {samp_label}", 0, max(hi, 1), 0,
+                              help="Raise this to drop small-sample players whose number may not hold up.") if hi > 0 else 0
+            row = row[row["sample"] >= min_s]
+        st.metric(f"Mariners {m}", f"{team_val:g}")
+        # for fielding, value and better_by are the same number (runs above average), so show it once
+        cols = (["rank", "name", "Team"] + (["position"] if show_pos else []) + (["bats"] if show_bats else [])
+                + ["sample", "value"] + ([] if is_fld else ["better_by"]))
+        show = row[cols].head(25).rename(columns={"sample": samp_label,
+                                                  "value": "Runs above average" if is_fld else m,
+                                                  "better_by": "Better than Mariners by"})
+        if is_fld:
+            st.caption("Fielding runs are already measured against an average fielder (0), so this is the best gloves "
+                       "in the league, not a comparison with the Mariners' team total.")
+        if len(row) < len(row_all):
+            st.caption(f"Filters on: {len(row)} of {len(row_all)} players match (players whose position or bat side "
+                       "is unknown are hidden when those filters are used).")
+        if row.empty:
+            st.info("No players match these filters for this stat.")
+        else:
+            st.dataframe(show, width="stretch", hide_index=True)
+            st.download_button("Download this list (CSV)", show.to_csv(index=False).encode("utf-8"),
+                               file_name=f"targets_{m}.csv", mime="text/csv")
+
     if "fielding_Rtot" not in metrics:
         st.info("No fielding list here: weakness_targets.py could not load player fielding data. "
                 "The fielding targets on screen 3 still work.")
@@ -491,7 +572,9 @@ elif screen == "4. The plan":
     st.write("How each position looks now and with the players you added. The starter changes only "
              "when an added player beats the current starter on 2026 stats (OPS for hitters, ERA for "
              "pitchers; pitching groups are compared with the staff average).")
-    depth = build_depth(fa_all, sel, read_export(folder, "mariners_starters.csv"))
+    starters_df = merge_position_starters(read_export(folder, "mariners_starters.csv"),
+                                          read_export(folder, "position_needs.csv"))
+    depth = build_depth(fa_all, sel, starters_df)
     rows, now_ops, after_ops = [], [], []
     for g, (pitch, d) in depth.items():
         now, after = starter_now_and_after(pitch, d)
