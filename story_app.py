@@ -176,9 +176,26 @@ screen = st.sidebar.radio(
     ["1. The problem", "2. Why it happened", "3. What to do", "4. The plan", "5. Who fixes it"])
 st.sidebar.caption("Reads the CSVs from offseason_report.py. Rerun the report, then refresh this page.")
 
+
+def _pool_status(folder_):
+    """(outside free agents, last-updated text) from free_agent_scored.csv, or (None, None)."""
+    path = os.path.join(folder_, "free_agent_scored.csv")
+    if not os.path.exists(path):
+        return None, None
+    d = load_csv(path, os.path.getmtime(path))
+    d = d[d["recommendation_score"].notna()] if "recommendation_score" in d.columns else d
+    n = len(external_only(d))
+    stamp = pd.Timestamp(os.path.getmtime(path), unit="s").strftime("%b %d, %Y")
+    return n, stamp
+
 if not os.path.isdir(folder):
     st.error(f"Folder not found: {folder}. Run offseason_report.py first.")
     st.stop()
+
+_n_pool, _stamp = _pool_status(folder)
+if _n_pool is not None:
+    st.sidebar.metric("Outside free agents scored", _n_pool)
+    st.sidebar.caption(f"Report last run {_stamp}. The pool is small until free agency opens after the World Series.")
 
 
 # ───────────────────────── 1. the problem ─────────────────────────
@@ -201,13 +218,18 @@ if screen == "1. The problem":
                    f"{r['Gap']:+g} vs league {r['League_Avg']:g}", delta_color="off")
         col.caption(f"Severity {r['Severity_Score']:.2f}")
 
+    st.caption("Severity = the gap to league average divided by a typical team-to-team spread for that stat. "
+               "Around 1 means one typical spread from average; 2 or more is a clear outlier.")
+
     st.subheader("Severity by area")
     cats = sorted(needs["Category"].unique())
     pick = st.multiselect("Categories", cats, default=cats)
     view = needs[needs["Category"].isin(pick)]
-    st.bar_chart(view.set_index("Metric")["Severity_Score"])
+    st.bar_chart(view.sort_values("Severity_Score", ascending=False).set_index("Metric")["Severity_Score"])
     with st.expander("Full table"):
         st.dataframe(view, width="stretch", hide_index=True)
+        st.download_button("Download this table (CSV)", view.to_csv(index=False).encode("utf-8"),
+                           file_name="mariners_diagnosed_needs.csv", mime="text/csv")
     st.info("Next: screen 2 shows who drove the change, screen 3 shows who could fix it.")
 
 
@@ -252,7 +274,8 @@ elif screen == "3. What to do":
     max_cost = None
     if "Est_Cost_M" in fa.columns and fa["Est_Cost_M"].notna().any():
         hi = float(np.ceil(fa["Est_Cost_M"].max()))
-        max_cost = c3.slider("Max cost ($M)", 0.0, hi, hi)
+        if hi > 0:
+            max_cost = c3.slider("Max cost ($M)", 0.0, hi, hi)
     bats = None
     if "bats" in fa.columns:
         bats = c4.multiselect("Bats", ["L", "R", "S"], default=["L", "R", "S"])
@@ -266,6 +289,9 @@ elif screen == "3. What to do":
     if v.empty:
         st.info("No outside free agents in the scored file yet. Free agency opens after the World Series: "
                 "then run python mlb_free_agents.py and rerun the report.")
+    elif not show_internal and len(v) < 25:
+        st.info(f"Only {len(v)} outside free agents are listed so far, so this is a short list, not the market. "
+                "Screen 5 ranks any MLB player on the Mariners' weak stats and works now.")
     if pos:
         v = v[v["position_group"].isin(pos)]
     p = priced(v)
@@ -282,7 +308,13 @@ elif screen == "3. What to do":
     show = [c for c in ["name", "position_group", "age_2027", "age_risk", "age_war600_per_yr", "Team", "bats",
                         "recommendation_score",
                         "Est_Cost_M", "OPS", "proj_OPS_2027", "Rtot", "option_detail"] if c in v.columns]
-    st.dataframe(v[show].head(50), width="stretch", hide_index=True)
+    st.dataframe(v[show].head(50), width="stretch", hide_index=True,
+                 column_config={"recommendation_score": st.column_config.NumberColumn("Fit score", format="%.2f"),
+                                "Est_Cost_M": st.column_config.NumberColumn("Est. cost ($M)", format="%.1f"),
+                                "age_war600_per_yr": st.column_config.NumberColumn("WAR/600 per yr", format="%.2f")})
+    if not v.empty:
+        st.download_button("Download this list (CSV)", v[show].to_csv(index=False).encode("utf-8"),
+                           file_name="free_agent_shortlist.csv", mime="text/csv")
     if "age_risk" in v.columns:
         st.caption("Age risk = how much hitters of that age and position group usually decline in a season "
                    "(WAR per 600 PA, from the R aging curves). It is an average, not a forecast for one player; "
@@ -396,6 +428,10 @@ elif screen == "4. The plan":
              "players with no price match are counted separately, not as $0.")
     fa_all = fa                      # keeps the Mariners' own rows for the depth chart
     fa = external_only(fa).sort_values("recommendation_score", ascending=False).reset_index(drop=True)
+    if fa.empty:
+        st.info("No outside free agents to build a slate from yet. Screen 5 works now; this screen fills in "
+                "after free agency opens.")
+        st.stop()
     fa["label"] = fa["name"] + " (" + fa.get("position_group", pd.Series("", index=fa.index)).fillna("").astype(str) + ")"
     fa = fa.drop_duplicates("label")   # the same player listed twice at one position counts once
 
@@ -438,6 +474,8 @@ elif screen == "4. The plan":
         show = [c for c in ["name", "position_group", "recommendation_score", "Est_Cost_M", "bats",
                             "proj_OPS_2027", "age_risk"] if c in sel.columns]
         st.dataframe(sel[show], width="stretch", hide_index=True)
+        st.download_button("Download my slate (CSV)", sel[show].to_csv(index=False).encode("utf-8"),
+                           file_name="signing_slate.csv", mime="text/csv")
 
         needs = read_export(folder, "diagnosed_needs.csv")
         if needs is not None:
