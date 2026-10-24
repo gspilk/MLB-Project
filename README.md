@@ -82,6 +82,7 @@ python minor_league_shortlist.py
 ```
 python main.py --refresh --print-only    # refresh data and grades without writing the Excel report
 python offseason_report.py               # where the team is weakest, by position and stat
+python position_needs.py                 # wins lost at each position, Mariners-only playing time
 python weakness_targets.py               # candidates ranked by fit to those weaknesses
 python -m streamlit run story_app.py     # the same, as an app
 python mlb_free_agents.py                # after the World Series: fills data/inputs/free_agents.csv
@@ -266,9 +267,32 @@ What the corrected data says about 2026:
 
 The earlier reading that pitching was the problem does not hold up: the offense was bad, and fielding fell sharply. How much of the fielding drop is real defence and how much is a changed roster is not settled, so that remains a hypothesis rather than a finding.
 
+### Where the wins are lost, by position
+
+`position_needs.py` answers "which positions cost the Mariners the most wins?" using only what each player did while he was a Mariner. A traded player's season is split by playing time, so his time with other teams does not count for Seattle. A hitter's WAR and plate appearances are shared across the positions he played in proportion to games at each, with games not in the field counted as DH. For each position the Mariners' WAR is compared with the league average, and the gap is in wins.
+
+| Position | Mariners WAR | League average | Wins below average |
+|---|---|---|---|
+| Third base | -0.7 | 2.2 | 3.0 |
+| Shortstop | -0.1 | 2.7 | 2.8 |
+| First base | -0.2 | 2.3 | 2.5 |
+| Right field | 0.6 | 1.6 | 1.0 |
+| Second base | 1.3 | 2.1 | 0.8 |
+| Center field | 2.0 | 2.7 | 0.8 |
+| Designated hitter | 2.2 | 2.8 | 0.6 |
+| Catcher | 2.2 | 2.1 | -0.1 |
+| Relievers | 2.8 | 2.7 | -0.1 |
+| Left field | 4.5 | 1.7 | -2.8 |
+| Starting pitchers | 17.2 | 11.3 | -5.9 |
+
+A position is labelled "Biggest need" at 1.5 or more wins below average and "Below average" above 0.25. The Mariners' starter at each position is the player with the most plate appearances there (at least 50 with the team), so a part-timer is no longer picked as the incumbent. The same starters feed the free-agent comparison and the depth chart in the app.
+
+The weakest positions are third base, shortstop and first base. The rotation is far ahead of the league, so pitching is not where the wins went. Starters reflect 2026 playing time, not a 2027 plan, so an injured player can still be listed.
+
 **Known limits.**
 
-- Choosing the incumbent at each position still uses whole-season rows and plate appearances only, so a handful of picks are poor (for example a designated hitter with 27 plate appearances). The weakest-position list should be read with that in mind until the needs table is rebuilt on playing time with Seattle only.
+- The fielding-first section of the report still picks its own "current" player at each position (for example Weston Wilson at third base), separate from the starters above.
+- Starters come from 2026 plate appearances at a position. They do not account for injuries or who is expected to play in 2027.
 - Player-level Mariners tables are still whole-season rows for traded players.
 - The free-agent pool is small until after the World Series.
 - One Baseball Savant catcher-framing file produces a parsing warning, which has not been fixed.
@@ -279,7 +303,6 @@ The earlier reading that pitching was the problem does not hold up: the offense 
 - Compare against previous seasons (multi-year player and team trend analysis; the starting-pitcher studies already do this for pitching)
 - Backtest the rest-of-season projection system against the actual final outcome once the season ends
 - Extend payroll data (`payroll.py`) into genuine value-per-dollar analysis
-- Rebuild the needs table by position on playing time with Seattle only, using position WAR against the league average and best
 - Model in R: replacement level by position, and a back-test of the free-agent fit model against past offseasons (aging curves are done, see above)
 - Load earlier seasons' Statcast tables into MySQL (player batting and pitching stats for 2022 to 2026 are already there)
 - Decide the fate of the trade-deadline-specific code (see note above) before next season's stretch run
