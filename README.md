@@ -136,8 +136,10 @@ python abs_analysis.py               # needs the Savant CSVs in data/inputs
   often (38.8% -> 51.4%). Woo's 2025 BABIP (.239) was unusually low and moved to .285. Gilbert threw fewer of his best
   strikeout pitches while his release point drifted about 9 inches over the season. Release-point shifts happened on
   different dates for different pitchers, so they are not a tracking recalibration.
-- **ABS.** Challenges cost the Mariners roughly a quarter of a win, partly through challenges not taken
-  (runs taken 24.3% vs 28.3% for the league) rather than bad challenges.
+- **ABS.** Challenges cost the Mariners roughly a quarter of a win (about 2.5 runs). It came from hitters' challenges:
+  they were overturned 41.7% of the time against 48.9% expected from the pitch locations (-2.7 runs, 28th of 30 teams).
+  Catchers were about average (+0.2 runs, 11th). Individual numbers rest on very few challenges (most players have fewer
+  than 10), and "expected" comes from Baseball Savant's own model.
 
 ### Caveats
 
