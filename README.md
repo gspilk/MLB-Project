@@ -110,6 +110,8 @@ defense adjustment), and everything below is a pattern worth watching, not proof
 | `pitchshape.py` | Spin, movement, extension, release and location per pitch type; lists pitches that lost whiffs and what changed with them. |
 | `release_timeline.py` | Release point by start; dates the biggest shift and says whether it fell at a season boundary. |
 | `abs_analysis.py` | ABS challenge results for Mariners hitters, catchers and teams from the Savant downloads. |
+| `bullpen_split.py` | Mariners relievers' results by month and first half vs second half, with a rough range (resampling games) for the change. Reads the cache `pitch_count_study.py` builds. |
+| `bullpen_context.py` | Save conversion and blown saves against the league, and which relievers were available (batters faced by half, plus their injured-list moves from the API's transactions). |
 
 ```
 python pitch_count_study.py          # first run downloads the season (about 1-2 minutes), then it is cached
@@ -119,13 +121,18 @@ python whiff_by_pitch.py
 python pitchshape.py
 python release_timeline.py
 python abs_analysis.py               # needs the Savant CSVs in data/inputs
+python bullpen_split.py              # run pitch_count_study.py first
+python bullpen_context.py
 ```
 
 ### What they found
 
 - **Pitch count is not the signal.** Opponent OPS does not climb through about 100 pitches, and starters rarely
   go past it. The weak spots are the 6th inning and the third time through the order (OPS against .695 / .701 / .751
-  the first, second and third time). Castillo is the exception: his trouble comes early (pitches 26-50, innings 3-4).
+  the first, second and third time). Innings 1 and 3 are also rough (OPS .788 and .793; the 3rd is the worst at about
+  5.1 runs per 9) while innings 2 and 4 are strong. That follows the lineup (the top of the order bats in innings 1
+  and 3), so part of the third-time-through jump may be the top of the order coming back, not tiring. Castillo is the
+  exception: his trouble comes early (pitches 26-50, innings 3-4).
 - **Velocity is not a "take him out" signal either.** Starts 1+ mph below a pitcher's own median allowed 2.91 runs per
   27 batters, against 3.01 in normal starts, and 54 of 138 starts lose 1+ mph from the first to the last 25 pitches
   with nothing wrong (Kirby and Gilbert do it almost every start).
@@ -140,6 +147,15 @@ python abs_analysis.py               # needs the Savant CSVs in data/inputs
   they were overturned 41.7% of the time against 48.9% expected from the pitch locations (-2.7 runs, 28th of 30 teams).
   Catchers were about average (+0.2 runs, 11th). Individual numbers rest on very few challenges (most players have fewer
   than 10), and "expected" comes from Baseball Savant's own model.
+- **Bullpen.** Relievers' OPS against rose from .694 before the All-Star break to .797 after (rough 90% range +.002 to
+  +.196, so probably real but modest). It was mostly an August problem: July was the best month of the season (.614),
+  August the worst (.896), September in between (.764). Hard contact did not rise (39.0% to 37.8%). The bullpen
+  converted 35 of 63 save chances (55.6%, 26th of 30; league average 63.5%) with 28 blown saves (league average 23.9)
+  and 81 holds (league 87.9). Availability mattered: Brash (four injured-list stints, last pitched June 8), Wilcox
+  (out Aug 7 to Sep 28), Criswell (June 9 to Aug 31), Davila (from Aug 31) and Vargas (until Aug 21) all missed
+  stretches, and the closer, Muñoz, had a 4.24 ERA (1.73 in 2025) and a short injured-list stay in late September.
+  Of the healthy relievers, Bazardo (.679 to .988) and Ferrer (+.113) declined. This is an association, not proof that
+  injuries caused the blown saves, and roster turnover means the two halves are not the same group of pitchers.
 
 ### Caveats
 
