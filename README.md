@@ -1,5 +1,4 @@
-# ⚾ Seattle Mariners Stretch-Run Analyzer
-
+# ⚾ Seattle Mariners Trade Deadline and Post Trade Simulator
 ![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white)
 ![SQL](https://img.shields.io/badge/MySQL-4479A1?logo=mysql&logoColor=white)
 ![R](https://img.shields.io/badge/R-276DC3?logo=r&logoColor=white)
