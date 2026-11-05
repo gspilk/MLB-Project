@@ -365,15 +365,14 @@ Blank CSV templates with the right column headers are created in `data/inputs/` 
 <details>
 <summary><b>About WAR</b></summary>
 
-WAR here is calculated by this project (`mlb_api.py`), not taken from another site, so numbers will be close to but not identical to other published WAR figures:
+WAR here is this project's own implementation of the standard public WAR framework (mlb_api.py), built from MLB Stats API and Statcast inputs, so numbers will be close to but not identical to other published WAR figures:
 
-- **Batters:** (batting runs from wOBA + baserunning runs + Statcast fielding runs + positional adjustment + replacement runs) ÷ runs per win
-- **Pitchers:** runs allowed per 9 vs. a league baseline adjusted for role (starter/reliever) and the team's defense, compared to a replacement-level pitcher; relievers are scaled by an estimated leverage
+Batters: (batting runs from wOBA + baserunning runs + Statcast fielding runs + positional adjustment + replacement runs) ÷ runs per win
+Pitchers: runs allowed per 9 vs. a league baseline adjusted for role (starter/reliever) and the team's defense, compared to a replacement-level pitcher; relievers are scaled by an estimated leverage
 
-**Fielding column names.** `Rtot` and `Rdrs` in the code are older column names. In this project both hold Statcast fielding runs (Outs Above Average, plus framing runs for catchers), not figures from another site.
+Fielding column names. Rtot and Rdrs in the code are older column names. In this project both hold Statcast fielding runs (Outs Above Average, plus framing runs for catchers).
 
 </details>
-
 ---
 
 <sub>MLB data © MLB Advanced Media, L.P. Use is personal and non-commercial, per MLB's [copyright notice](http://gdx.mlb.com/components/copyright.txt).</sub>
