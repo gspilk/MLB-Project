@@ -624,6 +624,46 @@ def compute_recommendation_score(df: pd.DataFrame, incumbents: dict,
     return df
 
 
+def _cost_cell(row) -> str:
+    """Cost column text: 'roster' for internal players (not free, not unknown),
+    'n/a' when no real salary was matched, else $M."""
+    if str(row.get("source", "")).startswith("Internal"):
+        return f"{'roster':>8}"
+    cost = row.get("Est_Cost_M")
+    return f"{cost:>8.1f}" if pd.notna(cost) else f"{'n/a':>8}"
+
+
+FOCUS_GROUPS = ["Shortstops", "Third Basemen", "Right Fielders",
+                "Right-Handed Relievers", "Left-Handed Relievers"]
+
+
+def print_focus_list(df: pd.DataFrame, groups=FOCUS_GROUPS, per_group: int = 5):
+    """Shopping-list view: top options for ONLY the spots we are actually
+    shopping (SS, 3B, RF, setup relievers), so first base etc. don't crowd the
+    main ranking. Rtot = Statcast Outs Above Average fielding runs."""
+    scored = df[df["recommendation_score"].notna()].copy()
+    print("\n" + "=" * 90)
+    print("SHOPPING LIST -- top options at the spots we are actually targeting")
+    print("=" * 90)
+    for g in groups:
+        sub = (scored[scored["position_group"] == g]
+               .sort_values("recommendation_score", ascending=False).head(per_group))
+        print(f"\n  {g}")
+        if sub.empty:
+            print("    (no scored options)")
+            continue
+        print(f"    {'Name':<20} {'Source':<18} {'Score':>6} {'Rtot':>5} {'Est $M':>8}")
+        for _, r in sub.iterrows():
+            rt = r.get("Rtot")
+            rt_str = f"{rt:>5.0f}" if pd.notna(rt) else f"{'n/a':>5}"
+            print(f"    {r['name']:<20} {r.get('source', '?'):<18} "
+                  f"{r['recommendation_score']:>6.2f} {rt_str} {_cost_cell(r)}")
+    print("=" * 90)
+    print("  Est $M = last contract's AAV, not next year's price. 'roster' = already on the team.")
+    print("  Score is offense + fit; for SS/3B read Rtot too -- the case there is defense.")
+    print("=" * 90 + "\n")
+
+
 def print_recommendations(df: pd.DataFrame, top_n: int = 15, by_value: bool = False):
     """
     by_value=False (default): ranked by recommendation_score, same as
@@ -650,16 +690,15 @@ def print_recommendations(df: pd.DataFrame, top_n: int = 15, by_value: bool = Fa
           "fit-adjusted, reliability-discounted")
     print("=" * 130)
     if has_cost:
-        print(f"  {'Name':<20} {'Source':<18} {'Position':<20} {'Raw upg':>8} "
+        print(f"  {'Name':<20} {'Source':<18} {'Position':<24} {'Raw upg':>8} "
               f"{'Reliab':>7} {'NeedW':>6} {'Fit':>5} {'SCORE':>7} {'Est $M':>8} {'Val/$M':>8}")
-        print("  " + "-" * 122)
+        print("  " + "-" * 126)
         for _, row in scored.head(top_n).iterrows():
-            cost = row.get("Est_Cost_M")
-            cost_str = f"{cost:>8.1f}" if pd.notna(cost) else "     n/a"
+            cost_str = _cost_cell(row)
             val = row.get("Value_Score")
             val_str = f"{val:>8.2f}" if pd.notna(val) else "     n/a"
             print(f"  {row['name']:<20} {row.get('source','?'):<18} "
-                  f"{row['position_group']:<20} "
+                  f"{row['position_group']:<24} "
                   f"{row['upgrade']:>8.2f} "
                   f"{row['reliability']:>7.2f} "
                   f"{row['need_weight']:>6.2f} "
@@ -667,12 +706,12 @@ def print_recommendations(df: pd.DataFrame, top_n: int = 15, by_value: bool = Fa
                   f"{row['recommendation_score']:>7.2f} "
                   f"{cost_str} {val_str}")
     else:
-        print(f"  {'Name':<20} {'Source':<18} {'Position':<20} {'Raw upg':>8} "
+        print(f"  {'Name':<20} {'Source':<18} {'Position':<24} {'Raw upg':>8} "
               f"{'Reliab':>7} {'NeedW':>6} {'Fit':>5} {'SCORE':>7}")
-        print("  " + "-" * 100)
+        print("  " + "-" * 104)
         for _, row in scored.head(top_n).iterrows():
             print(f"  {row['name']:<20} {row.get('source','?'):<18} "
-                  f"{row['position_group']:<20} "
+                  f"{row['position_group']:<24} "
                   f"{row['upgrade']:>8.2f} "
                   f"{row['reliability']:>7.2f} "
                   f"{row['need_weight']:>6.2f} "

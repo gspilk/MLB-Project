@@ -72,6 +72,38 @@ def load_scored(folder: str):
     return df
 
 
+def _key(name) -> str:
+    import re, unicodedata
+    x = unicodedata.normalize("NFKD", str(name))
+    x = "".join(c for c in x if not unicodedata.combining(c)).lower()
+    x = re.sub(r"[^a-z0-9 ]", " ", x)
+    x = re.sub(r"\b(jr|sr|ii|iii)\b", " ", x)
+    return " ".join(x.split())
+
+
+def load_resign(folder_: str):
+    """Current Mariners who are free agents (from resign_candidates.csv, written by
+    offseason_report.py), priced from data/inputs/free_agent_market.csv. They are not scored
+    as upgrades (re-signing yourself is not an outside upgrade); they just need to be pickable."""
+    rs = read_export(folder_, "resign_candidates.csv")
+    if rs is None or rs.empty:
+        return None
+    rs = rs.copy()
+    rs["Est_Cost_M"] = np.nan
+    rs["Market_Matched"] = "False"
+    mkt = os.path.join(os.path.dirname(os.path.abspath(folder_)), "inputs", "free_agent_market.csv")
+    if os.path.exists(mkt):
+        m = load_csv(mkt, os.path.getmtime(mkt)).copy()
+        if {"Name", "Prev_AAV"} <= set(m.columns):
+            m["_k"] = m["Name"].map(_key)
+            m["_c"] = pd.to_numeric(m["Prev_AAV"], errors="coerce") / 1e6
+            cost = m.dropna(subset=["_c"]).drop_duplicates("_k").set_index("_k")["_c"]
+            rs["Est_Cost_M"] = rs["name"].map(_key).map(cost)
+            rs["Market_Matched"] = np.where(rs["Est_Cost_M"].notna(), "True", "False")
+    rs["recommendation_score"] = np.nan
+    return rs
+
+
 def external_only(df: pd.DataFrame) -> pd.DataFrame:
     """Drops the Mariners' own roster players (source 'Internal (roster)'), leaving real outside targets."""
     if "source" not in df.columns:
@@ -188,7 +220,8 @@ st.sidebar.title("Mariners offseason")
 folder = DEFAULT_DIR
 screen = st.sidebar.radio(
     "Story",
-    ["1. The problem", "2. Why it happened", "3. What to do", "4. The plan", "5. Who fixes it"])
+    ["1. The problem", "2. Why it happened", "3. What to do", "4. The plan", "5. Who fixes it",
+     "6. The 2027 outlook"])
 st.sidebar.caption("Reads the CSVs from offseason_report.py. Rerun the report, then refresh this page.")
 
 
@@ -506,22 +539,30 @@ elif screen == "4. The plan":
         st.stop()
 
     st.write("Build a signing slate. The totals use last year's salary as a rough stand-in; "
-             "players with no price match are counted separately, not as $0.")
+             "players with no price match are counted separately, not as $0. "
+             "Current Mariners who are free agents appear as [re-sign] options.")
     fa_all = fa                      # keeps the Mariners' own rows for the depth chart
     fa = external_only(fa).sort_values("recommendation_score", ascending=False).reset_index(drop=True)
+    rs = load_resign(folder)
+    if rs is not None:
+        fa = pd.concat([fa, rs], ignore_index=True)
     if fa.empty:
         st.info("No outside free agents to build a slate from yet. Screen 5 works now; this screen fills in "
                 "after free agency opens.")
         st.stop()
     fa["label"] = fa["name"] + " (" + fa.get("position_group", pd.Series("", index=fa.index)).fillna("").astype(str) + ")"
+    is_rs = fa["source"].astype(str).str.startswith("Re-sign")
+    fa.loc[is_rs, "label"] = fa.loc[is_rs, "label"] + " [re-sign]"
     fa = fa.drop_duplicates("label")   # the same player listed twice at one position counts once
+    is_rs = fa["source"].astype(str).str.startswith("Re-sign")
 
     # Pick a position, then choose players at that position. The slate is kept in
     # session state, so picks made at one position stay when you switch to another.
     ALL = "All positions (top 60)"
     groups_avail = sorted(fa["position_group"].dropna().unique()) if "position_group" in fa.columns else []
     view = st.selectbox("Pick a position", [ALL] + groups_avail)
-    options = (fa.head(60) if view == ALL else fa[fa["position_group"] == view])["label"].tolist()
+    options = (pd.concat([fa[~is_rs].head(60), fa[is_rs]]) if view == ALL
+               else fa[fa["position_group"] == view])["label"].tolist()
     slate = st.session_state.setdefault("slate", [])
     picked = st.multiselect(
         "Players to sign" if view == ALL else f"Players to sign at {view}", options,
@@ -617,3 +658,55 @@ elif screen == "4. The plan":
         d = d.sort_values("Stat", ascending=pitch, na_position="last").reset_index(drop=True)
         d.index = d.index + 1
         st.dataframe(d, width="stretch")
+
+
+# ───────────────────────── screen 6: the 2027 outlook ─────────────────────────
+if screen == "6. The 2027 outlook":
+    st.title("6. The 2027 outlook")
+    sc = read_export(folder, "scenarios.csv")
+    led = read_export(folder, "plan_ledger.csv")
+    reb = read_export(folder, "plan_rebound.csv")
+    if sc is None or led is None or "start_wins" not in sc.columns:
+        st.warning("Run  python solution_sim_2027.py  first. It writes scenarios.csv and plan_ledger.csv, then refresh this page.")
+        st.stop()
+
+    st.write("Seattle went 76-86 in 2026. This is what the model says the roster has to do to get back to the playoffs, "
+             "in three scenarios. Each is 10,000 simulated seasons.")
+    cols = st.columns(len(sc))
+    for c, (_, r) in zip(cols, sc.iterrows()):
+        c.metric(r["scenario"], f"{r['expected_wins']:.1f} wins",
+                 f"{r['p_85_plus']:.0%} chance of 85+", delta_color="off")
+        c.caption(f"{r['story']}  |  new money ${r['new_money_M']:.0f}M  |  80% range {r['wins_p10']:.0f}-{r['wins_p90']:.0f}")
+
+    st.subheader("Problem to solution")
+    pick = st.radio("Scenario", list(sc["scenario"]), index=min(1, len(sc) - 1), horizontal=True)
+    rr = sc[sc["scenario"] == pick].iloc[0]
+    L = led[led["scenario"] == pick].copy()
+    L["wins"] = L["wins"].map(lambda v: f"{v:+.1f}")
+    L["cost_M"] = L["cost_M"].map(lambda v: f"${v:.0f}M" if v else "-")
+    st.dataframe(L[["problem", "fix", "wins", "cost_M"]].rename(columns={
+        "problem": "Problem", "fix": "Fix", "wins": "Wins added", "cost_M": "New money"}),
+        width="stretch", hide_index=True)
+    st.success(f"Do these and the model has Seattle at {rr['expected_wins']:.1f} wins on average, with a {rr['p_85_plus']:.0%} "
+               f"chance of reaching 85+ and a {rr['p_90_plus']:.0%} chance of 90+.")
+    st.caption("Win values are what is lost when that one move is taken out of the plan. They overlap a little, so they will not add exactly to the total.")
+
+    st.subheader("Where the wins come from")
+    steps = sc[["scenario", "rebound_wins", "free_agent_wins", "trade_wins"]].set_index("scenario")
+    steps.columns = ["Rebound", "Free agents", "Trades"]
+    st.bar_chart(steps)
+    st.caption(f"Starting point with no rebound and no new money: {sc['start_wins'].iloc[0]:.1f} wins.")
+
+    if reb is not None and not reb.empty:
+        st.subheader("The big assumption: do the three hitters come back?")
+        reb = reb.copy()
+        reb["Halfway back"] = reb["ops_2026"] + 0.5 * (reb["ops_2025"] - reb["ops_2026"])
+        st.dataframe(reb.rename(columns={"player": "Player", "ops_2025": "2025 OPS", "ops_2026": "2026 OPS"}).round(3),
+                     width="stretch", hide_index=True)
+
+    st.subheader("What this does not know")
+    st.markdown(
+        "- Projections use three years of results with no age adjustment.\n"
+        "- Prices are anchors (last contract, or $8M per projected win), not predicted bids.\n"
+        "- Trades are charged in salary only, not prospects, so trade gains are an upper bound.\n"
+        "- Starters are valued on projected ERA alone (170 innings, no injury risk), and the rebound moves hitting only.")

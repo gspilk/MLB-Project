@@ -46,6 +46,7 @@ from free_agent_recs import (
     add_upgrade_deltas, compute_recommendation_score, print_recommendations,
     save_top_upgrade_chart, print_depth_chart, find_bench_candidates,
     print_bench_candidates, generate_comparison_html, _get_current_roster_names,
+    print_focus_list,
 )
 from fielding_targets import (
     get_mariners_fielding_weak_spots, get_full_team_fielding_ledger,
@@ -172,6 +173,14 @@ def run_report(from_season: int = 2025, to_season: int = 2026):
     if excluded:
         print(f"  [info] excluded {excluded} free agent(s) who are also current "
               f"Mariners from the target pool")
+        # keep them available for the app's "The plan" screen as re-sign options
+        resign = enriched_all[enriched_all["name"].isin(current_roster)].copy()
+        keep = [c for c in ["name", "position_group", "Team", "OPS", "ERA", "PA", "IP", "BA", "SLG", "WAR"]
+                if c in resign.columns]
+        resign = resign[keep].assign(source="Re-sign (own free agent)")
+        os.makedirs(EXPORT_DIR, exist_ok=True)
+        resign.to_csv(os.path.join(EXPORT_DIR, "resign_candidates.csv"), index=False)
+        print(f"  [info] re-sign candidates: {', '.join(resign['name'])}")
 
     internal = build_internal_candidates(data, incumbents)
     print(f"\nFound {len(internal)} real internal roster candidates")
@@ -191,6 +200,7 @@ def run_report(from_season: int = 2025, to_season: int = 2026):
     if "Est_Cost_M" in scored.columns:
         print_recommendations(scored, by_value=True)
         print_position_conflicts(scored)
+    print_focus_list(scored)
 
     html_path = generate_comparison_html(scored, incumbents)
     print(f"\nReal comparison page saved: {html_path}")
