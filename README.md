@@ -2,12 +2,6 @@ Seattle Mariners Stretch-Run Analyzer
 
 A Python pipeline that pulls live 2026 MLB data — batting, pitching, standings, Statcast, and minor-league affiliate stats — from MLB's official sources and turns it into player grades, roster decisions, rest-of-season projections, and free-agent/prospect recommendations, all validated against real professional benchmarks. The data also goes into a MySQL database, and R is used for the multi-season analysis (aging curves, offense vs. pitching).
 
-Key findings
-The offense explains about 83% of the 2025-to-2026 decline. It fell from above the league average to clearly below it, while pitching and defense stayed near average (details).
-The weakest positions are third base, shortstop and first base, together about 8 wins below the league average (details).
-Starters weaken the third time through the order, not at a pitch count. Opponent OPS rose from .695 to .701 to .751 the first, second and third time through (details).
-ABS challenges cost the Mariners about a quarter of a win, mostly because hitters' challenges were overturned less often than expected.
-Validation caught real errors. Checking the simulator against published playoff odds exposed a bug silently excluding games from every projection, and checking team totals against game-level data showed traded players' full-season stats being credited to their last team (details).
 Project description
 
 Data: 2026 season — standings, schedules, rosters, batting, pitching, fielding and minor-league stats from the official MLB Stats API, plus Statcast from Baseball Savant. Payroll, free-agent market prices and prospect rankings come from small CSV files you maintain, and ABS challenge data from Baseball Savant leaderboard downloads (see Data sources). WAR is the project's own calculation (see mlb_api.py).
@@ -37,16 +31,24 @@ MySQL database and SQL queries (load_mysql.py, sql/) — loads the cached games,
 R analysis (r/offense_vs_pitching.R, r/aging_curves.R) — reads the MySQL database and draws charts: where the 2025-to-2026 drop came from, and how much hitters at 1B, 3B and SS decline with age. The aging results feed the app's age-risk column; see R analysis
 What makes it different
 Built on official, permitted sources. The MLB Stats API for traditional stats, standings, rosters and minor leagues; Baseball Savant for Statcast (xwOBA, Barrel%, Whiff%, Outs Above Average). One shared module (mlb_api.py) handles every API call, caching, and the project's own WAR, so every table uses the same player IDs and league context.
-Recommendations come from real statistical need, not a fixed wishlist. Both the free-agent tool and the 2026 trade-deadline logic identify the team's actual weak spots by position and stat, league-wide, rather than starting from a hand-picked list.
+Recommendations come from real statistical need, not a fixed wishlist. Both the free-agent tool and the (now-dated, see note below) in-season trade-target logic identify the team's actual weak spots by position and stat, league-wide, rather than starting from a hand-picked list.
 Validated against real, independent models, not just self-consistent. Simulator output was sanity-checked against publicly published playoff-odds projections. That process surfaced and fixed a real bug that had been silently excluding a chunk of the remaining schedule from every projection — the tool catching its own mistakes rather than just producing a number and trusting it. The same discipline (a small debug script to confirm the real data structure before trusting a source) has been used to catch and fix real bugs throughout this project.
 
-Trade-deadline tools: recommender.py's seller-based trade targets and the simulator's deadline step were built for the 2026 trade deadline and are kept for reference. For the offseason, the free-agent and internal-candidate tools below are the current way to answer "how does this team improve."
+Note on trade targets: recommender.py's seller-based trade-target logic and the simulator's "deadline simulation" step were built for the in-season trade deadline. That's now passed for 2026 — the code still runs, but the free-agent/internal-candidate pipeline is the more current answer to "how does this team improve." Worth deciding whether to keep, retire, or repurpose the deadline-era code for next year's stretch run.
 
 Steps (core pipeline)
 STEP 1/6 -- Building data...
 STEP 2/6 -- Analyzing team...
 STEP 3/6 -- Grading players...
 STEP 4/6 -- Generating recommendations...
+
+[recommend] Generating recommendations...
+  [targets] filtering batters to positions the team actually needs: [...]
+  [targets] N teams flagged as likely sellers based on live standings
+  [targets] N batter targets found
+  [targets] N pitcher targets found
+[recommend] Done.
+
 STEP 5/6 -- Running rest-of-season simulation...
 STEP 6/6 -- Generating Excel report...
 
@@ -155,7 +157,8 @@ R analysis: aging curves and offense vs pitching
 Two R scripts read the MySQL database (DBI and RMariaDB), do the calculation in R and draw the chart with ggplot2. The MySQL password is asked for when the script runs and is never stored in the repo.
 
 r
-# in RStudio, with the working directory set to the project folder
+# in RStudio, from the project folder
+setwd("C:/path/to/MLB-Project")
 source("r/offense_vs_pitching.R")   # Mariners vs the league by month, 2025 vs 2026
 source("r/aging_curves.R")          # how hitters change from one season to the next, by age
 
@@ -228,6 +231,7 @@ The weakest positions are third base, shortstop and first base. The rotation is 
 Known limits.
 
 The fielding-first section of the report still picks its own "current" player at each position (for example Weston Wilson at third base), separate from the starters above.
+Fielding is measured with one system, Statcast Outs Above Average, and other systems (Total Zone, Defensive Runs Saved) can rate individual players differently. The team-level finding (-50, 30th) is a Statcast-based reading, not a consensus across metrics.
 Starters come from 2026 plate appearances at a position. They do not account for injuries or who is expected to play in 2027.
 Player-level Mariners tables are still whole-season rows for traded players.
 The free-agent pool is small until after the World Series.
@@ -239,16 +243,16 @@ Backtest the rest-of-season projection system against the actual final outcome o
 Extend payroll data (payroll.py) into genuine value-per-dollar analysis
 Model in R: replacement level by position, and a back-test of the free-agent fit model against past offseasons (aging curves are done, see above)
 Load earlier seasons' Statcast tables into MySQL (player batting and pitching stats for 2022 to 2026 are already there)
-Update the trade-deadline tools for the 2027 deadline
+Decide the fate of the trade-deadline-specific code (see note above) before next season's stretch run
 Data sources
 What	Source	File
 Standings, schedules, rosters, player/team stats, minor leagues, platoon splits	MLB Stats API via MLB-StatsAPI	mlb_api.py and the modules built on it
 Pitch-by-pitch play-by-play (pitch counts, velocity, spin, release, results)	MLB Stats API, cached per game	pitch_count_study.py and the studies built on it
 Statcast (xwOBA, Barrel%, Whiff%), fielding runs (Outs Above Average)	Baseball Savant	statcast_scraper.py, mlb_api.py, team_half_splits.py
-Free agent class	A hand-maintained CSV, or MLB's free-agent list	data/inputs/free_agents.csv
-Free agent prices (last salary, contract type)	A hand-maintained CSV	data/inputs/free_agent_market.csv
-Payroll	A hand-maintained CSV	data/inputs/payroll_players.csv, data/inputs/payroll_league.csv
-Top prospect rankings	A hand-maintained CSV	data/inputs/top_prospects.csv
+Free agent class	Your list, or MLB's free-agent list	data/inputs/free_agents.csv
+Free agent prices (last salary, contract type)	Your list	data/inputs/free_agent_market.csv
+Payroll	Your list	data/inputs/payroll_players.csv, data/inputs/payroll_league.csv
+Top prospect rankings	Your list	data/inputs/top_prospects.csv
 ABS challenges	Baseball Savant ABS leaderboard, "Download CSV" by hand (batter, catcher, batting-team and fielding-team views)	data/inputs/abs*.csv, read by abs_analysis.py
 
 Blank CSV templates with the right column headers are created in data/inputs/ the first time each feature runs; anything left empty is skipped gracefully. Data is not included in this repository (data/ is git-ignored) — run python main.py --refresh to build it locally.
