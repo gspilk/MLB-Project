@@ -438,15 +438,15 @@ The weakest positions are third base, shortstop and first base. The rotation is 
 
 ## 🔭 Future opportunities
 
-- [ ] Fold minor-league shortlist candidates into the free-agent recommendation scoring, so "sign a free agent," "promote a prospect," and "play the bench guy we already have" are one ranked list instead of three separate tools
-- [ ] Compare against previous seasons (multi-year player and team trend analysis; the starting-pitcher studies already do this for pitching)
 - [x] 2027 projections, roster optimizer and season simulation (backtested; sensitivity checked)
+- [x] Aging curves in R, now also used as the age adjustment in the 2027 hitter projections
+- [ ] Fold the minor-league shortlist into the free-agent scoring, so "sign a free agent," "promote a prospect," and "play the bench guy we already have" are one ranked list (internal players such as Anderson, Emerson and Montes already compete with free agents in the 2027 model)
 - [ ] Model prospect value and what a traded player brings back, so trade gains are not an upper bound
 - [ ] Check the lineup's left/right balance and the payroll limit once 2027 contract data is available
-- [ ] Backtest the rest-of-season projection system against the actual final outcome once the season ends
+- [ ] Team-level trend analysis across seasons (the player aging curves and the starting-pitcher studies already compare years)
+- [ ] Backtest the rest-of-season projection system against the actual final outcome now that the season has ended
 - [ ] Extend payroll data (`payroll.py`) into genuine value-per-dollar analysis
 - [ ] Model in R: replacement level by position, and a back-test of the free-agent fit model against past offseasons
-- [x] Aging curves in R
 - [ ] Load earlier seasons' Statcast tables into MySQL (player batting and pitching stats for 2022 to 2026 are already there)
 - [ ] Update the trade-deadline tools for the 2027 deadline
 
