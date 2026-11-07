@@ -83,6 +83,35 @@ POSITION_GROUP_TO_DIAGNOSIS_CATEGORY = {
     "Right-Handed Relievers": "Bullpen", "Left-Handed Relievers": "Bullpen",
 }
 
+# Position need now comes from position_needs.py (wins below the league-average
+# position, from Mariners-only playing time), the same table the app shows --
+# not from a comparison of incumbent OPS/ERA, which flagged Catchers and the
+# bullpen as "weak" even though position_needs.py labels both "Fine".
+POSITION_NEEDS_CSV = os.path.join(os.path.dirname(__file__), "data", "exports", "position_needs.csv")
+NEED_LEVEL_WEIGHT = {"Biggest need": 1.5, "Below average": 1.25, "Fine": 1.0}
+POSITION_ABBR_TO_GROUPS = {
+    "C": ["Catchers"], "1B": ["First Basemen"], "2B": ["Second Basemen"],
+    "3B": ["Third Basemen"], "SS": ["Shortstops"], "LF": ["Left Fielders"],
+    "CF": ["Center Fielders"], "RF": ["Right Fielders"], "DH": ["Designated Hitters"],
+    "SP": ["Starting Pitchers"], "RP": ["Right-Handed Relievers", "Left-Handed Relievers"],
+}
+
+
+def load_position_need_weights() -> dict:
+    """{position_group: weight} from data/exports/position_needs.csv, or {} if the
+    file is missing (run position_needs.py) -- the caller then falls back to the
+    old incumbent-OPS/ERA rule."""
+    if not os.path.exists(POSITION_NEEDS_CSV):
+        print("  [warn] data/exports/position_needs.csv not found -- run position_needs.py. "
+              "Falling back to the old incumbent OPS/ERA need rule.")
+        return {}
+    tbl = pd.read_csv(POSITION_NEEDS_CSV)
+    weights = {}
+    for _, r in tbl.iterrows():
+        for group in POSITION_ABBR_TO_GROUPS.get(r["position"], []):
+            weights[group] = NEED_LEVEL_WEIGHT.get(r["need"], 1.0)
+    return weights
+
 
 def _get_current_roster_names(data: dict) -> set:
     """
@@ -475,8 +504,8 @@ def compute_recommendation_score(df: pd.DataFrame, incumbents: dict,
 
     2. POSITION-LEVEL NEED WEIGHTING: an upgrade at a real, confirmed
        weak position should outrank a bigger raw upgrade at a position
-       that's already fine. Positions below the team's own average
-       incumbent OPS/ERA get a 1.5x multiplier; everyone else gets 1.0x.
+       that's already fine. Weights come from position_needs.py's wins-below-
+       average label: Biggest need 1.5x, Below average 1.25x, Fine 1.0x.
 
     3. TEAM-LEVEL DIAGNOSIS MULTIPLIER (new): layered on top of #2 using
        team_diagnosis.py's category severity -- see
@@ -543,6 +572,7 @@ def compute_recommendation_score(df: pd.DataFrame, incumbents: dict,
     weak_pitcher_positions = {g for g, info in pitcher_incumbents.items()
                               if avg_era is not None and info["ERA"] > avg_era}
     weak_positions = weak_batter_positions | weak_pitcher_positions
+    wins_weights = load_position_need_weights()
 
     for idx, row in df.iterrows():
         if pd.isna(row.get("upgrade")):
@@ -560,7 +590,10 @@ def compute_recommendation_score(df: pd.DataFrame, incumbents: dict,
                      # player_grades.py's own established convention
 
         reliability = sample / (sample + k) if sample else 0
-        position_need_weight = 1.5 if row["position_group"] in weak_positions else 1.0
+        if wins_weights:
+            position_need_weight = wins_weights.get(row["position_group"], 1.0)
+        else:
+            position_need_weight = 1.5 if row["position_group"] in weak_positions else 1.0
 
         diagnosis_category = POSITION_GROUP_TO_DIAGNOSIS_CATEGORY.get(row["position_group"])
         diagnosis_mult = team_multipliers.get(diagnosis_category, 1.0)
@@ -647,7 +680,7 @@ def print_recommendations(df: pd.DataFrame, top_n: int = 15, by_value: bool = Fa
                   f"{row['recommendation_score']:>7.2f}")
     print("=" * 130)
     print("  Score = (upgrade / real scale) * (sample / (sample + k)) * need_weight * fit_bonus")
-    print("  need_weight = position-level need (1.0/1.5) * team diagnosis category multiplier")
+    print("  need_weight = position need (Fine 1.0 / Below avg 1.25 / Biggest 1.5) * team diagnosis multiplier")
     print("    (see team_diagnosis.py / data/diagnosed_needs.csv -- run that first for this to be live)")
     print("  fit_bonus = contact/power profile match (batters) * defense bonus (when a real Rtot match exists)")
     print("  Reliability approaches 1.0 with a real, substantial sample;")

@@ -84,7 +84,7 @@ def load_market_data(path: str = MARKET_CSV) -> pd.DataFrame:
 
     df["Prev_AAV"] = pd.to_numeric(df["Prev_AAV"], errors="coerce")
     df["Prev_AAV_M"] = df["Prev_AAV"] / 1_000_000
-    df["_opt_out_floor_M"] = df["Contract_Type"].apply(_opt_out_value)
+    df["_opt_out_floor_M"] = pd.to_numeric(df["Contract_Type"].apply(_opt_out_value), errors="coerce")
     df["Est_Cost_M"] = df[["Prev_AAV_M", "_opt_out_floor_M"]].max(axis=1, skipna=True)
     df["_key"] = df["Name"].apply(_normalize_name)
     return df
@@ -129,9 +129,13 @@ def attach_market_data(df: pd.DataFrame, market: pd.DataFrame) -> pd.DataFrame:
             continue
         m = get_market_row(row.get("name"), market)
         if m is not None:
-            out.at[idx, "Est_Cost_M"] = round(float(m["Est_Cost_M"]), 2)
-            out.at[idx, "Contract_Type"] = m["Contract_Type"]
-            out.at[idx, "Market_Matched"] = True
+            # a row with no salary typed in yet is NOT a cost match -- it stays
+            # "n/a" (never treated as free) instead of crashing on a blank cell
+            cost = pd.to_numeric(m["Est_Cost_M"], errors="coerce")
+            if pd.notna(cost):
+                out.at[idx, "Est_Cost_M"] = round(float(cost), 2)
+                out.at[idx, "Contract_Type"] = m["Contract_Type"]
+                out.at[idx, "Market_Matched"] = True
 
     out["Est_Cost_M"] = pd.to_numeric(out["Est_Cost_M"], errors="coerce")
 
@@ -181,6 +185,17 @@ def find_position_conflicts(scored: pd.DataFrame, top_n: int = 15) -> dict:
     return conflicts
 
 
+def _cost_label(r) -> str:
+    """'on roster' for internal players, 'cost n/a' when no salary was entered,
+    otherwise '$X.XM' -- never prints $nanM or shows a missing cost as $0."""
+    if r.get("Market_Matched") == "internal":
+        return "on roster"
+    cost = r.get("Est_Cost_M")
+    if cost is None or pd.isna(cost):
+        return "cost n/a"
+    return f"${cost:.1f}M"
+
+
 def print_position_conflicts(scored: pd.DataFrame, top_n: int = 15):
     conflicts = find_position_conflicts(scored, top_n)
     if not conflicts:
@@ -190,7 +205,7 @@ def print_position_conflicts(scored: pd.DataFrame, top_n: int = 15):
     print("=" * 90)
     for group, rows in conflicts.items():
         names = ", ".join(f"{r['name']} (score {r['recommendation_score']:.2f}, "
-                          f"${r.get('Est_Cost_M') or 0:.1f}M)" for r in rows)
+                          f"{_cost_label(r)})" for r in rows)
         print(f"  {group}: {names}")
     print("  You can only roster one of these per spot -- treat the rest as depth/")
     print("  alternate-scenario options, not simultaneous real targets.")
