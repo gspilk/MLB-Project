@@ -250,6 +250,7 @@ The loader reads the files the other scripts already cache (`data/exports`, `dat
 Two R scripts read the MySQL database (DBI and RMariaDB), do the calculation in R and draw the chart with ggplot2. The MySQL password is asked for when the script runs and is never stored in the repo.
 
 
+```r
 # in RStudio, with the working directory set to the project folder
 source("r/offense_vs_pitching.R")   # Mariners vs the league by month, 2025 vs 2026
 source("r/aging_curves.R")          # how hitters change from one season to the next, by age
@@ -333,6 +334,7 @@ The weakest positions are third base, shortstop and first base. The rotation is 
 <summary><b>Known limits</b></summary>
 
 - The fielding-first section of the report still picks its own "current" player at each position (for example Weston Wilson at third base), separate from the starters above.
+- Fielding is measured with one system, Statcast Outs Above Average, and other systems (Total Zone, Defensive Runs Saved) can rate individual players differently. The team-level finding (-50, 30th) is a Statcast-based reading, not a consensus across metrics.
 - Starters come from 2026 plate appearances at a position. They do not account for injuries or who is expected to play in 2027.
 - Player-level Mariners tables are still whole-season rows for traded players.
 - The free-agent pool is small until after the World Series.
@@ -375,12 +377,13 @@ Blank CSV templates with the right column headers are created in `data/inputs/` 
 
 WAR here is this project's own implementation of the standard public WAR framework (mlb_api.py), built from MLB Stats API and Statcast inputs, so numbers will be close to but not identical to other published WAR figures:
 
-Batters: (batting runs from wOBA + baserunning runs + Statcast fielding runs + positional adjustment + replacement runs) ÷ runs per win
-Pitchers: runs allowed per 9 vs. a league baseline adjusted for role (starter/reliever) and the team's defense, compared to a replacement-level pitcher; relievers are scaled by an estimated leverage
+- **Batters:** (batting runs from wOBA + baserunning runs + Statcast fielding runs + positional adjustment + replacement runs) ÷ runs per win
+- **Pitchers:** runs allowed per 9 vs. a league baseline adjusted for role (starter/reliever) and the team's defense, compared to a replacement-level pitcher; relievers are scaled by an estimated leverage
 
-Fielding column names. Rtot and Rdrs in the code are older column names. In this project both hold Statcast fielding runs (Outs Above Average, plus framing runs for catchers).
+**Fielding column names.** `Rtot` and `Rdrs` in the code are older column names. In this project both hold Statcast fielding runs (Outs Above Average, plus framing runs for catchers).
 
 </details>
+
 ---
 
 <sub>MLB data © MLB Advanced Media, L.P. Use is personal and non-commercial, per MLB's [copyright notice](http://gdx.mlb.com/components/copyright.txt).</sub>
