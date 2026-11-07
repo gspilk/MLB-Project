@@ -145,18 +145,23 @@ def calibrate(rs_override=None, ra_override=None):
     pit["ER"] = _num(pit["ER"]) if "ER" in pit.columns else np.nan
     ok = pit.dropna(subset=["_ip", "ER"])
     lg_era = float(ok["ER"].sum() / ok["_ip"].sum() * 9) if ok["_ip"].sum() > 0 else 4.2
-    rot = []
+    rot, depth = [], []
     if {"GS", "Name", "ERA"} <= set(pit.columns):
         mine = pit[pit["team_id"] == SEA_ID].copy()
         mine["GS"], mine["ERA"] = _num(mine["GS"]), _num(mine["ERA"])
         mine = mine.dropna(subset=["GS", "ERA"]).sort_values("GS", ascending=False).head(SP_SPOTS)
         rot = [{"name": str(r["Name"]).split(" (")[0].strip(), "era": float(r["ERA"]), "gs": int(r["GS"])}
                for _, r in mine.iterrows()]
+        rest = pit[pit["team_id"] == SEA_ID].copy()
+        rest["GS"], rest["ERA"] = _num(rest["GS"]), _num(rest["ERA"])
+        rest = rest.dropna(subset=["GS", "ERA"]).sort_values("GS", ascending=False).iloc[SP_SPOTS:]
+        depth = [{"name": str(r["Name"]).split(" (")[0].strip(), "era": float(r["ERA"]), "gs": int(r["GS"])}
+                 for _, r in rest[rest["GS"] >= 3].head(4).iterrows()]
     rpw = 10.0 / (162 * (pyth(rs + 10, ra) - pyth(rs, ra)))
     return {"slope": slope, "slope_note": note, "rs": rs, "ra": ra, "ra_src": ra_src,
             "table_rs": table_rs, "table_ra": table_ra,
             "lg_ops": float(t["o"].sum() / t["PA"].sum()), "rpw": rpw,
-            "lg_era": lg_era, "rotation": rot}
+            "lg_era": lg_era, "rotation": rot, "depth": depth}
 
 
 # ── data lookups ─────────────────────────────────────────────────────────────
@@ -186,6 +191,13 @@ class Data:
             mk["_k"] = mk["Name"].map(norm_key)
             mk["_c"] = _num(mk["Prev_AAV"]) / 1e6
             self.market = mk.dropna(subset=["_c"]).drop_duplicates("_k").set_index("_k")["_c"]
+        ov = _read("prospect_overrides.csv", INPUT_DIR, required=False)
+        self.era_override = {}
+        if ov is not None and {"Name", "Proj_ERA"} <= set(ov.columns):
+            for _, r in ov.iterrows():
+                v = _num(pd.Series([r["Proj_ERA"]])).iloc[0]
+                if pd.notna(v):
+                    self.era_override[norm_key(r["Name"])] = float(v)
         self.skipped, self.unpriced = [], 0
 
     def projection(self, name, kind):
@@ -316,12 +328,13 @@ def build_rotation(cal, d, price_mode, resign_keys):
             k = norm_key(name)
             if k in seen:
                 return
+            projected = d.era_override.get(k, projected)
             if projected is None:
                 d.skipped.append(name)
                 return
             v = (cal["lg_era"] - projected) * SP_IP / 9 * RUNS_PER_ER
             war = (v + repl_runs) / cal["rpw"]
-            price = 0.0 if source in ("Returns", "Replacement") else price_of(prev, war, price_mode)
+            price = 0.0 if source in ("Returns", "Replacement", "Internal depth") else price_of(prev, war, price_mode)
             if price is None:
                 d.unpriced += 1
                 return
@@ -339,6 +352,10 @@ def build_rotation(cal, d, price_mode, resign_keys):
                 add(occ["name"], "Re-sign", d.prev_cost(occ["name"]), proj)
             else:
                 add(occ["name"], "Returns", None, proj)
+        for dp in cal.get("depth", []):
+            if norm_key(dp["name"]) not in resign_keys:
+                pj = d.projection(dp["name"], "pitching")
+                add(dp["name"], "Internal depth", None, pj if pj is not None else dp["era"])
         for _, r in pool.iterrows():
             sc = r.get("Est_Cost_M") if str(r.get("Market_Matched")).lower() == "true" else None
             add(r["name"], "Free agent", d.prev_cost(r["name"], sc), d.projection(r["name"], "pitching"))
@@ -526,10 +543,25 @@ def apply_rebound(slots, table, frac, cal):
     return new, log
 
 
+def league_rtot():
+    """name key -> fielding runs (Rtot) for every fielder in the 2026 fielding table, if that table is available."""
+    try:
+        t = load_season(2026, "fielding").copy()
+        col = next((c for c in ("Rtot", "Rdrs") if c in t.columns), None)
+        if col is None or "Name" not in t.columns:
+            return {}
+        t[col] = _num(t[col])
+        t["_k"] = t["Name"].astype(str).str.split(" \\(").str[0].map(norm_key)
+        return t.dropna(subset=[col]).groupby("_k")[col].sum().to_dict()
+    except Exception:
+        return {}
+
+
 def load_trade_targets(cal, d):
     """Impact bats you could trade for. Reads data/inputs/trade_targets.csv (Name, Pos, Salary_M, optional Proj_OPS, Rtot);
     if the file is absent, uses one placeholder impact bat at each open lineup spot."""
-    rows, real = [], False
+    rows, real, filled = [], False, []
+    league_rt = league_rtot()
     tt = _read("trade_targets.csv", INPUT_DIR, required=False)
     if tt is not None and {"Name", "Pos", "Salary_M"} <= set(tt.columns):
         rev = {v: k for k, v in ABBR.items()}
@@ -551,12 +583,17 @@ def load_trade_targets(cal, d):
             if pd.isna(ops):
                 ops = d.projection(r["Name"], "batting")
             rt = _num(pd.Series([r.get("Rtot")])).iloc[0] if "Rtot" in tt.columns else np.nan
+            if pd.isna(rt):
+                rt = league_rt.get(norm_key(r["Name"]), np.nan)
+                filled.append(str(r["Name"])) if pd.notna(rt) else None
             if g is None or pd.isna(sal) or ops is None or pd.isna(ops):
                 d.skipped.append(str(r["Name"]))
                 continue
             rows.append({"group": g, "name": str(r["Name"]), "ops": float(ops), "rtot": 0.0 if pd.isna(rt) else float(rt),
                          "salary": float(sal)})
         real = bool(rows)
+        if rows and not filled:
+            d.skipped.append("(fielding runs not found for trade targets; they are treated as average defenders)")
     if not rows:
         for g in IMPACT_SPOTS:
             rows.append({"group": g, "name": f"Impact bat ({ABBR[g]}, placeholder)", "ops": IMPACT_OPS, "rtot": 0.0,
@@ -853,6 +890,7 @@ def main():
     ap.add_argument("--exclude", action="append", default=[], help='rule a player out of every plan: --exclude "Tarik Skubal"')
     ap.add_argument("--sp-rebound", type=float, default=0.0, help="0-1: returning starters move this far from 2026 ERA back to 2025 ERA")
     ap.add_argument("--trade-away", action="append", default=[], help='trade a player off the roster: --trade-away "George Kirby=9.8" (salary freed in $M)')
+    ap.add_argument("--def-keep", type=float, default=None, help="share of one season's fielding runs to count (default 0.5; 1.0 = defense-first)")
     ap.add_argument("--no-scenarios", action="store_true", help="skip the three-scenario improvement story")
     a = ap.parse_args()
 
@@ -867,7 +905,9 @@ def main():
             locks[g.strip()] = n.strip()
     frozen = set(FROZEN) - set(a.open)
 
-    global SP_FRAC, SP_TABLE, BUDGET_BONUS
+    global SP_FRAC, SP_TABLE, BUDGET_BONUS, DEF_KEEP
+    if a.def_keep is not None:
+        DEF_KEEP = max(0.0, a.def_keep)
     cal = calibrate(a.rs, a.ra)
     d = Data()
     slots = build_slots(cal, d, a.price)

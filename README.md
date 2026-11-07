@@ -1,4 +1,4 @@
-# ⚾ Seattle Mariners Trade Deadline and Post Trade Simulator
+# ⚾ Seattle Mariners Trade Deadline, Post-Trade and 2027 Offseason Analyzer
 ![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white)
 ![SQL](https://img.shields.io/badge/MySQL-4479A1?logo=mysql&logoColor=white)
 ![R](https://img.shields.io/badge/R-276DC3?logo=r&logoColor=white)
@@ -17,6 +17,7 @@ A Python pipeline that pulls live 2026 MLB data — batting, pitching, standings
 | 📉 | **The weakest positions are third base, shortstop and first base.** ([details](#where-the-wins-are-lost-by-position)) | **~8 wins** below average combined |
 | 🔁 | **Starters weaken the third time through the order, not at a pitch count.** ([details](#what-they-found)) | OPS against **.695 → .701 → .751** |
 | 🤖 | **ABS challenges cost the Mariners,** mostly because hitters' challenges were overturned less often than expected. ([details](#what-they-found)) | **~¼ win** (about 2.5 runs) |
+| 🔮 | **A 76-86 team gets to about 85 wins if its three star hitters recover halfway and the money is spent well.** Simulated over 10,000 seasons. ([details](#-2027-outlook-what-has-to-go-right)) | **84.9 wins**, 52% chance of 85+ |
 | ✅ | **Validation caught real errors:** a simulator bug silently excluding games, and traded players' full-season stats credited to their last team. ([details](#-data-checks-what-was-wrong-and-how-it-was-fixed)) | Team runs **735 → 664** after the fix |
 
 ![Offense vs pitching, 2025 vs 2026](r/figures/offense_vs_pitching_2025_2026.png)
@@ -30,6 +31,7 @@ A Python pipeline that pulls live 2026 MLB data — batting, pitching, standings
 - [Starting-pitcher studies and ABS](#-starting-pitcher-studies-2025-vs-2026-and-abs)
 - [MySQL database and SQL queries](#-mysql-database-and-sql-queries)
 - [R analysis: aging curves and offense vs pitching](#-r-analysis-aging-curves-and-offense-vs-pitching)
+- [2027 outlook: what has to go right](#-2027-outlook-what-has-to-go-right)
 - [Data checks: what was wrong and how it was fixed](#-data-checks-what-was-wrong-and-how-it-was-fixed)
 - [Future opportunities](#-future-opportunities)
 - [Data sources](#-data-sources)
@@ -78,6 +80,7 @@ flowchart LR
 | **Platoon lineup optimizer** | `platoon_lineup_optimizer.py` | vs-LHP/vs-RHP lineup construction from real split data |
 | **Starting-pitcher and ABS studies** | see [below](#-starting-pitcher-studies-2025-vs-2026-and-abs) | Pitch counts, velocity, pitch mix, whiffs, release point and ABS challenges |
 | **MySQL database and SQL queries** | `load_mysql.py`, `sql/` | Loads the cached games, pitches, plate appearances and player stats into MySQL and answers questions with SQL, including whether offense or pitching explains the 2025-to-2026 drop |
+| **2027 projections, roster optimizer and season simulation** | `project_2027.py`, `solution_sim_2027.py`, `sensitivity_2027.py` | Projects every player for 2027 (backtested, with an age adjustment), finds the best roster a budget can buy, and simulates 10,000 seasons for a conservative, base and optimistic case. Shown on screen 6 of the app |
 | **R analysis** | `r/offense_vs_pitching.R`, `r/aging_curves.R` | Reads the MySQL database and draws charts: where the 2025-to-2026 drop came from, and how much hitters at 1B, 3B and SS decline with age. The aging results feed the app's age-risk column |
 
 ### What makes it different
@@ -276,6 +279,95 @@ How much does a hitter change from one season to the next, by age? The script ta
 
 ---
 
+## 🔮 2027 outlook: what has to go right
+
+The Mariners went 76-86 in 2026 after 90-72 in 2025. This part of the project asks: **what would the 2027 roster need to look like to get back to the playoffs, and how likely is that?** It projects every player, finds the best roster a given budget can buy, and simulates 10,000 seasons for each of three scenarios.
+
+### Result
+
+*Run: `python solution_sim_2027.py --exclude "Tarik Skubal" --exclude "Drew Rasmussen" --lock "Left Fielders=none"`. Skubal and Rasmussen are excluded because the first is priced beyond what is realistic and the second is unlikely to be traded. The no-new-money starting point is **75.5 wins**.*
+
+| Scenario | What has to go right | New money | Expected wins | 80% range | Chance of 85+ | Chance of 90+ |
+|---|---|---|---|---|---|---|
+| **Conservative** | Projections only; free-agent plan, no trades | $50M | **79.4** | 71-88 | 28% | ~13% |
+| **Base** | Raleigh, Naylor and Julio Rodríguez recover halfway; two trade targets | $94M | **84.9** | 77-93 | 52% | ~31% |
+| **Optimistic** | All three fully recover; four trade targets | $145M | **90.6** | 83-98 | 76% | ~55% |
+
+- **Base is roughly a coin flip for 85 wins**, with no help from the top free-agent starter or from a trade the other team has said it will not make.
+- **Where the wins come from (Base):** about +1.8 from the three hitters recovering, +6.4 from free agents, +1.2 from trades.
+- **The plan (Base):** sign Seiya Suzuki (RF), Jason Adam (RHP), Adrian Morejon (LHP) and Michael King (SP); trade for Zach Neto (SS) and Joe Ryan (SP).
+- **Randy Arozarena is not re-signed in Base.** At his price the money does more elsewhere. He is re-signed in the Optimistic scenario, where the budget is larger.
+- **Kade Anderson** (the #3 pick in 2025, 3.79 ERA over 35.2 MLB innings) is treated as a free, under-contract rotation candidate with a 3.92 ERA, the Baseball Reference 2027 projection. The model's five-man rotation does not include George Kirby, which makes Kirby a surplus starter and a trade chip. Trading him changes Base by 0.1 wins, but what he would bring back is not modelled.
+
+### What drives the result (sensitivity)
+
+`sensitivity_2027.py` changes one assumption at a time from the Base plan (84.8 wins in that run):
+
+| Change | Effect on Base |
+|---|---|
+| Hitters recover fully instead of halfway | +4.5 wins |
+| Starters also recover fully (Woo, Gilbert) | +2.4 wins |
+| Budget cut from $100M to $60M | -2.0 wins |
+| No trades allowed | -1.8 wins |
+| Free-agent prices 25% higher / lower | about -1 / +1 win |
+| Defense weighted fully instead of half (`--def-keep 1.0`) | -0.6 wins; same plan |
+
+**The biggest bet is whether the three hitters bounce back.** Prices, defense and the budget matter far less.
+
+### How it works
+
+1. **Projections** (`project_2027.py`): a three-year, recency-weighted (3/2/1) blend of each player's own record, pulled toward the league average in proportion to how little he has played (the same idea as the Phillies strikeout-rate project). Hitters use OPS, pitchers use ERA. Hitters also get an **age adjustment** from the R aging curves, with the strength chosen by backtest.
+2. **Roster optimizer** (`solution_sim_2027.py`): builds every 2027 spot (9 lineup spots, 2 setup-reliever spots, 5 rotation spots) and finds the best signings within a budget using a knapsack search, with an optional limit on the number of trades. Players under contract are free; free-agent prices are the larger of last contract and about $8M per projected win.
+3. **Season simulation:** 10,000 simulated seasons with random talent error for each player (the same luck in every scenario) and game-by-game luck. Runs convert to wins with a Pythagorean formula calibrated to Seattle's official 2026 totals (664 scored, 722 allowed).
+4. **Scenarios:** a "rebound" setting moves Raleigh, Naylor and Rodríguez a fraction of the way from their 2026 OPS back to their 2025 OPS (0, 0.5, 1.0). Trade targets come from `data/inputs/trade_targets.csv` and are charged in salary only.
+5. **The app:** screen 6 of `story_app.py` shows the scenarios, the problem-to-solution table for each, and where the wins come from.
+
+### How accurate are the projections? (backtest on 2025 and 2026)
+
+| Error vs. what happened (lower is better) | Projection | League-average guess | "Same as last year" |
+|---|---|---|---|
+| Hitters (OPS) | **0.065** | 0.073 | 0.080 |
+| Pitchers (ERA) | **0.97** | 1.02 | 1.26 |
+
+- For hitters the projection beats both simple guesses, and the gap is biggest for players with little playing time last year (0.076 vs 0.105 for "same as last year" under 250 PA).
+- The age adjustment cut hitter error a further 1.4% (0.0651 to 0.0642). The aging curves were built from the same seasons, so this is a slightly friendly test.
+- **Pitcher ERA is hard to predict.** The projection is only modestly better than guessing the league average, so the pitching side carries more uncertainty than the hitting side.
+
+### Limits
+
+- **The result rests on the three-hitter rebound.** If Raleigh, Naylor and Rodríguez do not recover, Base falls toward the Conservative result.
+- **Trades cost salary only.** A real trade also costs prospects, so trade gains are an upper bound. What a traded player brings back (such as for Kirby) is not modelled.
+- **Prices are anchors, not predicted bids.** Some players (for example Suzuki) end up priced above their likely market.
+- **Defense is one noisy season** of Statcast fielding runs, half kept. The rebound moves hitting only.
+- **Starters are valued on ERA alone,** with no injury risk, and young pitchers such as Anderson rest on a small sample.
+- **Not modelled:** payroll limits (payroll files are blank), left-handed vs right-handed balance, and prospect value.
+
+<details>
+<summary><b>Run order and options</b></summary>
+
+```bash
+python offseason_report.py        # diagnosis, free-agent scoring, exports
+python project_2027.py            # 2027 projections, backtest and age adjustment
+python solution_sim_2027.py --exclude "Tarik Skubal" --exclude "Drew Rasmussen" --lock "Left Fielders=none"
+python sensitivity_2027.py        # one-at-a-time changes from the Base plan
+python -m streamlit run story_app.py   # screen 6 = the outlook
+```
+
+| Option | What it does |
+|---|---|
+| `--exclude "Name"` | Rules a player out (repeat for more) |
+| `--lock "Left Fielders=none"` | Unlocks a spot that is otherwise held for a named player |
+| `--trade-away "George Kirby=9.8"` | Removes a player and frees his salary |
+| `--sp-rebound 1.0` | Lets starters recover toward their 2025 ERA |
+| `--def-keep 1.0` | Counts fielding runs fully instead of half |
+| `--scenario-budget Base=120` | Changes a scenario's budget in $M |
+
+The app shows whichever run was made last, so finish with the headline command above. Rotation candidates under contract, such as Anderson, can be given a projection by hand in `data/inputs/prospect_overrides.csv` (`Name,Proj_ERA`).
+
+</details>
+
+---
+
 ## ✅ Data checks: what was wrong and how it was fixed
 
 Checking the team tables against the game-level data in MySQL turned up several errors. They are fixed, and are written down here because they change how the numbers should be read.
@@ -348,6 +440,9 @@ The weakest positions are third base, shortstop and first base. The rotation is 
 
 - [ ] Fold minor-league shortlist candidates into the free-agent recommendation scoring, so "sign a free agent," "promote a prospect," and "play the bench guy we already have" are one ranked list instead of three separate tools
 - [ ] Compare against previous seasons (multi-year player and team trend analysis; the starting-pitcher studies already do this for pitching)
+- [x] 2027 projections, roster optimizer and season simulation (backtested; sensitivity checked)
+- [ ] Model prospect value and what a traded player brings back, so trade gains are not an upper bound
+- [ ] Check the lineup's left/right balance and the payroll limit once 2027 contract data is available
 - [ ] Backtest the rest-of-season projection system against the actual final outcome once the season ends
 - [ ] Extend payroll data (`payroll.py`) into genuine value-per-dollar analysis
 - [ ] Model in R: replacement level by position, and a back-test of the free-agent fit model against past offseasons
@@ -368,6 +463,8 @@ The weakest positions are third base, shortstop and first base. The rotation is 
 | Free agent prices (last salary, contract type) | A hand-maintained CSV | `data/inputs/free_agent_market.csv` |
 | Payroll | A hand-maintained CSV | `data/inputs/payroll_players.csv`, `data/inputs/payroll_league.csv` |
 | Top prospect rankings | A hand-maintained CSV | `data/inputs/top_prospects.csv` |
+| Trade targets (name, position, 2027 salary) | A hand-maintained CSV; salaries from public sources (MLB Trade Rumors, Spotrac, FanGraphs RosterResource), arbitration figures are estimates | `data/inputs/trade_targets.csv` |
+| Optional hand-set projections for players with little history | A hand-maintained CSV (Kade Anderson: Baseball Reference 2027 projection) | `data/inputs/prospect_overrides.csv` |
 | ABS challenges | Baseball Savant ABS leaderboard, "Download CSV" by hand (batter, catcher, batting-team and fielding-team views) | `data/inputs/abs*.csv`, read by `abs_analysis.py` |
 
 Blank CSV templates with the right column headers are created in `data/inputs/` the first time each feature runs; anything left empty is skipped gracefully. Data is not included in this repository (`data/` is git-ignored) — run `python main.py --refresh` to build it locally.
@@ -385,5 +482,7 @@ WAR here is this project's own implementation of the standard public WAR framewo
 </details>
 
 ---
+
+**Tools and resources.** This project was built in Python, MySQL and R. Claude (Anthropic, https://claude.ai) was used as a collaborative tool for designing the modelling approach, writing and debugging code, and drafting this documentation; the results were checked by running the code on real data and comparing against independent sources.
 
 <sub>MLB data © MLB Advanced Media, L.P. Use is personal and non-commercial, per MLB's [copyright notice](http://gdx.mlb.com/components/copyright.txt).</sub>
