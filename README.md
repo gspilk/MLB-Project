@@ -316,7 +316,7 @@ The Mariners went 76-86 in 2026 after 90-72 in 2025. This part of the project as
 
 ### How it works
 
-1. **Projections** (`project_2027.py`): a three-year, recency-weighted (3/2/1) blend of each player's own record, pulled toward the league average in proportion to how little he has played (the same idea as the Phillies strikeout-rate project). Hitters use OPS, pitchers use ERA. Hitters also get an **age adjustment** from the R aging curves, with the strength chosen by backtest.
+1. **Projections** (`project_2027.py`): a three-year, recency-weighted (3/2/1) blend of each player's own record, pulled toward the league average in proportion to how little he has played. Hitters use OPS, pitchers use ERA. Hitters also get an **age adjustment** from the R aging curves, with the strength chosen by backtest.
 2. **Roster optimizer** (`solution_sim_2027.py`): builds every 2027 spot (9 lineup spots, 2 setup-reliever spots, 5 rotation spots) and finds the best signings within a budget using a knapsack search, with an optional limit on the number of trades. Players under contract are free; free-agent prices are the larger of last contract and about $8M per projected win.
 3. **Season simulation:** 10,000 simulated seasons with random talent error for each player (the same luck in every scenario) and game-by-game luck. Runs convert to wins with a Pythagorean formula calibrated to Seattle's official 2026 totals (664 scored, 722 allowed).
 4. **Scenarios:** a "rebound" setting moves Raleigh, Naylor and Rodríguez a fraction of the way from their 2026 OPS back to their 2025 OPS (0, 0.5, 1.0). Trade targets come from `data/inputs/trade_targets.csv` and are charged in salary only.
