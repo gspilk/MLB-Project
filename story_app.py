@@ -659,6 +659,59 @@ elif screen == "4. The plan":
         d.index = d.index + 1
         st.dataframe(d, width="stretch")
 
+    # ---- test this slate in the 2027 model (same engine as screen 6) ----
+    st.header("Test this slate in the 2027 model")
+    st.write("Sends the players you picked into the 2027 simulation behind screen 6: every spot starts from the "
+             "no-new-money roster, and a signing only starts if he projects better than the current player there. "
+             "It needs the 2027 projections, so run  python project_2027.py  first.")
+    names_sel = list(dict.fromkeys(sel["name"].astype(str))) if not sel.empty else []
+    if not names_sel:
+        st.info("Pick players above, then test them here.")
+    else:
+        if st.button("Run my slate through the 2027 model"):
+            try:
+                import whatif_2027 as w27
+            except Exception as e:
+                st.error(f"Could not load whatif_2027.py (it must be in the project folder): {e}")
+            else:
+                with st.spinner("Simulating 10,000 seasons at three rebound levels..."):
+                    try:
+                        st.session_state["slate_result"] = (tuple(names_sel), w27.evaluate_slate(names_sel))
+                    except Exception as e:
+                        st.session_state["slate_result"] = None
+                        st.error(f"The 2027 model could not run: {e}")
+        saved = st.session_state.get("slate_result")
+        if saved and saved[0] == tuple(names_sel) and saved[1]:
+            res = saved[1]
+            if res["missing"]:
+                st.warning("Not in the 2027 model (no projection or price), so left out: " + ", ".join(res["missing"]))
+            if res["levels"]:
+                names_lvl = {0.0: "No recovery", 0.5: "Halfway recovery", 1.0: "Full recovery"}
+                mid = next((l for l in res["levels"] if abs(l["rebound"] - 0.5) < 1e-9), res["levels"][0])
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Expected wins (hitters recover halfway)", f"{mid['slate_wins']:.1f}",
+                          f"{mid['gain']:+.1f} vs no new money ({mid['no_new_wins']:.1f})")
+                c2.metric("Chance of 85+ wins", f"{mid['p85']:.0%}", f"{mid['p85'] - mid['p85_no_new']:+.0%} vs no new money")
+                c3.metric("Cost of the slate ($M/yr)", f"{res['cost']:.1f}")
+                st.caption("Recovery = how far Raleigh, Naylor and Rodriguez come back toward their 2025 OPS.")
+                st.dataframe(pd.DataFrame([{
+                    "If the three hitters": names_lvl.get(l["rebound"], f"{l['rebound']:.0%} recovery"),
+                    "No new money": f"{l['no_new_wins']:.1f}", "Your slate": f"{l['slate_wins']:.1f}",
+                    "Gain": f"{l['gain']:+.1f}", "Chance of 85+": f"{l['p85']:.0%}", "Chance of 90+": f"{l['p90']:.0%}"}
+                    for l in res["levels"]]), width="stretch", hide_index=True)
+            if res["players"]:
+                st.subheader("Each signing on its own")
+                st.dataframe(pd.DataFrame([{
+                    "Player": r["player"], "Spot": r["spot"], "Replaces": r["replaces"],
+                    "Projection": f"{r['projection']:.3f} OPS" if r["is_hitter"] else f"{r['projection']:.2f} ERA",
+                    "Cost ($M)": f"{r['cost_M']:.1f}", "Wins added": f"{r['wins_alone']:+.2f}"} for r in res["players"]]),
+                    width="stretch", hide_index=True)
+            benched = [f"{n} ({why})" for n, what, why in res["notes"] if what == "bench"]
+            if benched:
+                st.warning("Counted as cost with no wins (bench depth in this model): " + "; ".join(benched))
+            st.caption("Prices are the model's anchors, not predicted bids. The model has one starter per spot and no "
+                       "platoon, injury or bench value. Compare with the three scenarios on screen 6.")
+
 
 # ───────────────────────── screen 6: the 2027 outlook ─────────────────────────
 if screen == "6. The 2027 outlook":
@@ -704,9 +757,11 @@ if screen == "6. The 2027 outlook":
         st.dataframe(reb.rename(columns={"player": "Player", "ops_2025": "2025 OPS", "ops_2026": "2026 OPS"}).round(3),
                      width="stretch", hide_index=True)
 
+    st.info("Want to try your own signings? Build a slate on screen 4 and use \"Test this slate in the 2027 model\" at the bottom.")
+
     st.subheader("What this does not know")
     st.markdown(
-        "- Projections use three years of results with no age adjustment.\n"
+        "- Projections use three years of results, plus an age adjustment for hitters.\n"
         "- Prices are anchors (last contract, or $8M per projected win), not predicted bids.\n"
         "- Trades are charged in salary only, not prospects, so trade gains are an upper bound.\n"
         "- Starters are valued on projected ERA alone (170 innings, no injury risk), and the rebound moves hitting only.")

@@ -80,7 +80,7 @@ flowchart LR
 | **Platoon lineup optimizer** | `platoon_lineup_optimizer.py` | vs-LHP/vs-RHP lineup construction from real split data |
 | **Starting-pitcher and ABS studies** | see [below](#-starting-pitcher-studies-2025-vs-2026-and-abs) | Pitch counts, velocity, pitch mix, whiffs, release point and ABS challenges |
 | **MySQL database and SQL queries** | `load_mysql.py`, `sql/` | Loads the cached games, pitches, plate appearances and player stats into MySQL and answers questions with SQL, including whether offense or pitching explains the 2025-to-2026 drop |
-| **2027 projections, roster optimizer and season simulation** | `project_2027.py`, `solution_sim_2027.py`, `sensitivity_2027.py` | Projects every player for 2027 (backtested, with an age adjustment), finds the best roster a budget can buy, and simulates 10,000 seasons for a conservative, base and optimistic case. Shown on screen 6 of the app |
+| **2027 projections, roster optimizer and season simulation** | `project_2027.py`, `solution_sim_2027.py`, `sensitivity_2027.py`, `whatif_2027.py` | Projects every player for 2027 (backtested, with an age adjustment), finds the best roster a budget can buy, and simulates 10,000 seasons for a conservative, base and optimistic case. Shown on screen 6 of the app |
 | **R analysis** | `r/offense_vs_pitching.R`, `r/aging_curves.R` | Reads the MySQL database and draws charts: where the 2025-to-2026 drop came from, and how much hitters at 1B, 3B and SS decline with age. The aging results feed the app's age-risk column |
 
 ### What makes it different
@@ -320,7 +320,21 @@ The Mariners went 76-86 in 2026 after 90-72 in 2025. This part of the project as
 2. **Roster optimizer** (`solution_sim_2027.py`): builds every 2027 spot (9 lineup spots, 2 setup-reliever spots, 5 rotation spots) and finds the best signings within a budget using a knapsack search, with an optional limit on the number of trades. Players under contract are free; free-agent prices are the larger of last contract and about $8M per projected win.
 3. **Season simulation:** 10,000 simulated seasons with random talent error for each player (the same luck in every scenario) and game-by-game luck. Runs convert to wins with a Pythagorean formula calibrated to Seattle's official 2026 totals (664 scored, 722 allowed).
 4. **Scenarios:** a "rebound" setting moves Raleigh, Naylor and Rodríguez a fraction of the way from their 2026 OPS back to their 2025 OPS (0, 0.5, 1.0). Trade targets come from `data/inputs/trade_targets.csv` and are charged in salary only.
-5. **The app:** screen 6 of `story_app.py` shows the scenarios, the problem-to-solution table for each, and where the wins come from.
+5. **The app:** screen 6 of `story_app.py` shows the scenarios, the problem-to-solution table for each, and where the wins come from. Screen 4 lets you pick your own free agents and test the slate in the same simulation (`whatif_2027.py`).
+
+### Testing your own signings
+
+On screen 4, any slate of free agents can be run through the 2027 model. Every spot starts from the no-new-money roster, and a signing only starts if he projects better than the player already there; otherwise he is counted as cost with no wins. Results below are at halfway recovery for Raleigh, Naylor and Rodríguez (no-new-money baseline 77.3 wins).
+
+| Slate | Cost ($M) | Wins | Chance of 85+ | Takeaway |
+|---|---|---|---|---|
+| Suzuki + Adam | 39.8 | 80.2 | 32% | One big bat and one reliever is the most efficient package tested |
+| Sosa + Adam + Morejon + Happ | 58.6 | 80.0 | 31% | Costs $19M more for fewer wins; Happ (0.730) does not beat free Lazaro Montes (0.730) |
+| Suzuki + Morejon + Abreu + Sosa + Dubón | 79.6 | 82.1 | 40% | Realistic package: one big bat, two relievers, infield depth |
+| Suzuki + Morejon + Romero + Abreu + Dubón + Sosa + Suárez | 108.4 | 82.4 | 41% | Romero sits behind Morejon and Suárez adds only +0.25, so $44M more buys 0.3 wins |
+| Suzuki + Grichuk | 51.5 | 79.3 | 28% | Same as Suzuki alone; the second right fielder is wasted |
+
+Cost per added win, cheapest first: bullpen arms about $12M, Suzuki about $14M, King about $18M, Sosa and Grichuk about $19-20M, Randy Arozarena about $48M. Depth value (injury cover, platoons) is not in the model, so players signed mainly as depth look worse here than they may be in practice.
 
 ### How accurate are the projections? (backtest on 2025 and 2026)
 
