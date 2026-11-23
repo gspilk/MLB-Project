@@ -95,6 +95,8 @@ def main():
     ap.add_argument("--compare", action="append", default=[], help='e.g. "Left-Handed Relievers=JoJo Romero,Adrian Morejon"')
     ap.add_argument("--impact", action="append", default=[], help="players whose added impact to measure")
     ap.add_argument("--exclude", action="append", default=[])
+    ap.add_argument("--add-rp", action="append", default=[], help='e.g. "James McArthur=Right-Handed Relievers,1.0" (a reliever acquired by trade: spot, salary $M)')
+    ap.add_argument("--move", action="append", default=[], help='e.g. "Brendan Donovan=Left Fielders" (a returning player changes spots)')
     ap.add_argument("--trade-away", action="append", default=[], help='e.g. "George Kirby=9.8" (salary freed in $M)')
     ap.add_argument("--rebounds", default="0,0.5,1.0", help="hitter rebound levels to test")
     a = ap.parse_args()
@@ -103,6 +105,7 @@ def main():
     cal = S.calibrate(None, None)
     d = S.Data()
     slots0 = S.build_slots(cal, d, "market")
+    slots_orig = [dict(s_, opts=list(s_["opts"])) for s_ in slots0]   # the untouched roster, for the "versus today" line
     gone = {S.norm_key(n) for n in a.exclude}
     for s_ in slots0:
         s_["opts"] = [o for o in s_["opts"] if o["key"] not in gone]
@@ -138,6 +141,43 @@ def main():
         if not ok:
             print(f"  (no 2027 projection found for {nm}; left out)")
 
+    # --add-rp "Name=Right-Handed Relievers,1.0": a reliever who is already under contract or acquired by trade. He is added
+    # to that setup spot at his projected ERA; sign him with --sign to count him (his salary is charged).
+    for item in a.add_rp:
+        nm, _, rest = item.partition("=")
+        grp, _, sal = rest.partition(",")
+        grp = grp.strip()
+        era = d.projection(nm.strip(), "pitching")
+        tgt = [i for i, s_ in enumerate(slots0) if s_["group"] == grp and not s_["hitter"]]
+        if era is None or not tgt:
+            print(f"  (--add-rp skipped for '{item}': no 2027 pitching projection found, or no spot called '{grp}')")
+            continue
+        sal_v = float(sal) if sal.strip() else 1.0
+        v = (d.lg_bp - float(era)) * S.RP_IP / 9 * S.RUNS_PER_ER * S.LEVERAGE
+        o_ = {"slot": grp, "name": nm.strip(), "key": S.norm_key(nm), "source": "Trade", "proj": float(era), "rtot": 0.0,
+              "rtot_known": True, "v": v, "war": (v + S.REPL_RUNS_RP) / cal["rpw"], "price": sal_v, "prev": sal_v,
+              "cu": int(round(sal_v / S.UNIT)), "hitter": False}
+        slots0[tgt[0]] = dict(slots0[tgt[0]], opts=slots0[tgt[0]]["opts"] + [o_])
+        print(f"  Added reliever {nm.strip()} at {grp}: projected {float(era):.2f} ERA, salary ${sal_v:.1f}M.")
+
+    # --move "Name=Spot": a returning player changes position (price 0). His old spot loses him; the new spot gains him
+    # at his projected OPS with neutral defense (his old-position fielding number does not carry over).
+    for item in a.move:
+        nm, _, grp = item.partition("=")
+        grp = grp.strip()
+        h = find_opt(slots0, nm.strip())
+        tgt = [i for i, s_ in enumerate(slots0) if s_["group"] == grp]
+        if not h or not tgt or not h[1].get("hitter"):
+            print(f"  (--move skipped for '{item}': need a returning hitter and a lineup spot such as 'Left Fielders')")
+            continue
+        i_old, o = h
+        new_o = dict(o, slot=grp, rtot=0.0,
+                     v=cal["slope"] * S.SLOT_PA * (o["proj"] - cal["lg_ops"]))
+        slots0 = [dict(s_, opts=[x for x in s_["opts"] if not (j == i_old and x["key"] == o["key"])]) if j == i_old else s_
+                  for j, s_ in enumerate(slots0)]
+        slots0[tgt[0]] = dict(slots0[tgt[0]], opts=slots0[tgt[0]]["opts"] + [new_o])
+        print(f"  Moved {o['name']} from {slots_orig[i_old]['group']} to {grp} (proj {o['proj']:.3f} OPS, defense counted as average).")
+
     def setup(frac):
         sl, _ = S.apply_rebound(slots0, table, frac, cal)
         no_trades = [dict(s_, opts=[o for o in s_["opts"] if o["source"] != "Trade"]) for s_ in sl]
@@ -158,6 +198,9 @@ def main():
     sl, base = setup(mid)
     pkg_hits = resolve(sl, sign, "--sign")
     maybe_hits = resolve(sl, maybe, "--maybe")
+    for _i, _o in pkg_hits + maybe_hits:
+        if _o.get("hitter"):
+            print(f"  {_o['name']}: projection {_o['proj']:.3f} OPS, fielding runs (Rtot) used {_o['rtot']:+.1f}, source {_o['source']}")
     plans = {"base": base}
     solo = {}
     for i, o in pkg_hits + maybe_hits:
@@ -191,6 +234,7 @@ def main():
     print(hdr)
     notes_shown = False
     odds_rows = []
+    orig_rows = []
     for fr in fracs:
         sl_f, base_f = setup(fr)
         hits = resolve(sl_f, sign, "--sign") if False else [find_opt(sl_f, n) for n in sign]
@@ -207,12 +251,21 @@ def main():
         ww = wins_table(sl_f, cal, d, plans)
         od = odds(sl_f, cal, d, {k: v for k, v in plans.items() if k in ("base", "pkg", "pkg2")})
         odds_rows.append((fr, od, bool(mhits)))
+        if a.move or away:
+            sl_o, _ = S.apply_rebound(slots_orig, table, fr, cal)
+            base_o = S.best_plan([dict(s_, opts=[o for o in s_["opts"] if o["source"] != "Trade"]) for s_ in sl_o], 0, allsets, {}, use_locks=False)
+            orig_rows.append((fr, wins_table(sl_f, cal, d, {"o": base_o, "p": pk})))
         line = f"  {fr:<9.2f}{ww['base']:>9.1f}{ww['pkg']:>9.1f}{ww['pkg'] - ww['base']:>+7.1f}{cost:>9.1f}{cost - freed:>8.1f}{ww['best']:>20.1f}"
         if mhits:
             line += f"{ww['pkg2']:>12.1f}{ww['pkg2'] - ww['pkg']:>+12.1f}"
         print(line)
         if not notes_shown:
             first_notes, notes_shown = notes, True
+    if orig_rows:
+        print("\n  VERSUS TODAY'S ROSTER (nobody moved, nobody traded away, nothing signed)")
+        print(f"  {'Rebound':<9}{'Today':>9}{'Your plan':>11}{'Net change':>12}")
+        for fr, w_ in orig_rows:
+            print(f"  {fr:<9.2f}{w_['o']:>9.1f}{w_['p']:>11.1f}{w_['p'] - w_['o']:>+12.1f}")
     print("\n  CHANCE OF REACHING 85 AND 90 WINS (10,000 simulated seasons, luck included)")
     print(f"  {'Rebound':<9}{'No new money':>18}{'Package':>18}" + (f"{'Package + maybe':>20}" if maybe_hits else ""))
     for fr, od, has_m in odds_rows:
